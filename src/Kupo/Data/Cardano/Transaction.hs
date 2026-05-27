@@ -8,49 +8,46 @@ import Kupo.Data.Cardano.TransactionId
     )
 
 import qualified Cardano.Chain.UTxO as Ledger.Byron
-import qualified Cardano.Ledger.Alonzo.Tx as Ledger.Alonzo
 import qualified Cardano.Ledger.Core as Ledger
-import qualified Cardano.Ledger.Shelley.Tx as Ledger.Shelley
 
 
 -- Transaction
+--
+-- TODO vanrossem: cardano-ledger >= 1.20 introduced @TxLevel@ as an extra
+-- parameter on @Tx@. We pin to @Ledger.TopTx@ here to preserve the
+-- chain-level transaction semantics; if kupo needs to handle sub-transactions
+-- (Conway+ governance / inline plutus, etc.) this will need revisiting.
 
 data Transaction
     = TransactionByron
         !Ledger.Byron.Tx
         !Ledger.Byron.TxId
     | TransactionShelley
-        !(Ledger.Shelley.ShelleyTx ShelleyEra)
+        !(Ledger.Tx Ledger.TopTx ShelleyEra)
     | TransactionAllegra
-        !(Ledger.Shelley.ShelleyTx AllegraEra)
+        !(Ledger.Tx Ledger.TopTx AllegraEra)
     | TransactionMary
-        !(Ledger.Shelley.ShelleyTx MaryEra)
+        !(Ledger.Tx Ledger.TopTx MaryEra)
     | TransactionAlonzo
-        !(Ledger.Alonzo.AlonzoTx AlonzoEra)
+        !(Ledger.Tx Ledger.TopTx AlonzoEra)
     | TransactionBabbage
-        !(Ledger.Alonzo.AlonzoTx BabbageEra)
+        !(Ledger.Tx Ledger.TopTx BabbageEra)
     | TransactionConway
-        !(Ledger.Alonzo.AlonzoTx ConwayEra)
+        !(Ledger.Tx Ledger.TopTx ConwayEra)
 
 instance HasTransactionId Transaction where
     getTransactionId = \case
         TransactionByron _ i ->
             transactionIdFromByron i
         TransactionShelley tx ->
-            let body = Ledger.Shelley.body tx
-             in Ledger.txIdTxBody @ShelleyEra body
+            Ledger.txIdTx @ShelleyEra tx
         TransactionAllegra tx ->
-            let body = Ledger.Shelley.body tx
-             in Ledger.txIdTxBody @AllegraEra body
+            Ledger.txIdTx @AllegraEra tx
         TransactionMary tx ->
-            let body = Ledger.Shelley.body tx
-             in Ledger.txIdTxBody @MaryEra body
+            Ledger.txIdTx @MaryEra tx
         TransactionAlonzo tx ->
-            let body = Ledger.Alonzo.body tx
-             in Ledger.txIdTxBody @AlonzoEra body
+            Ledger.txIdTx @AlonzoEra tx
         TransactionBabbage tx ->
-            let body = Ledger.Alonzo.body tx
-             in Ledger.txIdTxBody @BabbageEra body
+            Ledger.txIdTx @BabbageEra tx
         TransactionConway tx ->
-            let body = Ledger.Alonzo.body tx
-             in Ledger.txIdTxBody @ConwayEra body
+            Ledger.txIdTx @ConwayEra tx
