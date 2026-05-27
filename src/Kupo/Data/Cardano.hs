@@ -184,17 +184,17 @@ instance IsBlock Block where
              in
                 foldrWithIndex ignoreProtocolTxs result (extractTxs blk)
         BlockShelley (ShelleyBlock (Ledger.Block _ txs) _) ->
-            foldrWithIndex (\ix -> fn ix . TransactionShelley) result (Ledger.fromTxSeq txs)
+            foldrWithIndex (\ix -> fn ix . TransactionShelley) result (txs ^. Ledger.txSeqBlockBodyL)
         BlockAllegra (ShelleyBlock (Ledger.Block _ txs) _) ->
-            foldrWithIndex (\ix -> fn ix . TransactionAllegra) result (Ledger.fromTxSeq txs)
+            foldrWithIndex (\ix -> fn ix . TransactionAllegra) result (txs ^. Ledger.txSeqBlockBodyL)
         BlockMary (ShelleyBlock (Ledger.Block _ txs) _) ->
-            foldrWithIndex (\ix -> fn ix . TransactionMary) result (Ledger.fromTxSeq txs)
+            foldrWithIndex (\ix -> fn ix . TransactionMary) result (txs ^. Ledger.txSeqBlockBodyL)
         BlockAlonzo (ShelleyBlock (Ledger.Block _ txs) _) ->
-            foldrWithIndex (\ix -> fn ix . TransactionAlonzo) result (Ledger.fromTxSeq txs)
+            foldrWithIndex (\ix -> fn ix . TransactionAlonzo) result (txs ^. Ledger.txSeqBlockBodyL)
         BlockBabbage (ShelleyBlock (Ledger.Block _ txs) _) ->
-            foldrWithIndex (\ix -> fn ix . TransactionBabbage) result (Ledger.fromTxSeq txs)
+            foldrWithIndex (\ix -> fn ix . TransactionBabbage) result (txs ^. Ledger.txSeqBlockBodyL)
         BlockConway (ShelleyBlock (Ledger.Block _ txs) _) ->
-            foldrWithIndex (\ix -> fn ix . TransactionConway) result (Ledger.fromTxSeq txs)
+            foldrWithIndex (\ix -> fn ix . TransactionConway) result (txs ^. Ledger.txSeqBlockBodyL)
 
     spentInputs
         :: Transaction
