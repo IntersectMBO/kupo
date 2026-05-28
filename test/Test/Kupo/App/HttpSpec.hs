@@ -94,8 +94,10 @@ import Network.Wai
     )
 import Test.Hspec
     ( Spec
+    , expectationFailure
     , parallel
     , runIO
+    , shouldBe
     , shouldContain
     , shouldSatisfy
     , specify
@@ -139,6 +141,8 @@ import Test.QuickCheck.Monadic
     )
 
 import qualified Data.Aeson as Json
+import qualified Data.Aeson.Key as Json.Key
+import qualified Data.Aeson.KeyMap as Json.KeyMap
 import qualified Data.Aeson.Types as Json
 import qualified Data.ByteString as BS
 import qualified Data.Map as Map
@@ -205,6 +209,44 @@ spec = do
             res <- Wai.request $ Wai.setPath Wai.defaultRequest "/checkpoints"
             res & Wai.assertStatus (Http.statusCode Http.status200)
             res & assertJson True schema
+
+        -- Insurance against ToJSON Point overlap regression.
+        --
+        -- ouroboros-network ships a generic 'ToJSON (Ouroboros.Point block)'
+        -- instance that conflicts with Kupo.Data.Cardano.Point's OVERLAPPING
+        -- instance. If the upstream instance ever wins (e.g. a polymorphic
+        -- helper is introduced, generic deriving is added to a record carrying
+        -- a Point, or upstream renames their instance head), this test fails
+        -- loudly instead of silently changing the public wire format.
+        specify "/checkpoints encodes points as {slot_no, header_hash}" $ do
+            stub <- newStubbedApplication []
+            Wai.withSession stub $ do
+                res <- Wai.request $ Wai.setPath Wai.defaultRequest "/checkpoints"
+                res & Wai.assertStatus (Http.statusCode Http.status200)
+                case Json.eitherDecode (Wai.simpleBody res) of
+                    Left e ->
+                        liftIO . expectationFailure $
+                            "GET /checkpoints did not return valid JSON: " <> e
+                    Right (Json.Array xs) -> liftIO $ do
+                        toList xs `shouldSatisfy` not . null
+                        forM_ xs $ \v -> case v of
+                            Json.Object o -> do
+                                sort (Json.Key.toText <$> Json.KeyMap.keys o)
+                                    `shouldBe` ["header_hash", "slot_no"]
+                                case Json.KeyMap.lookup "slot_no" o of
+                                    Just (Json.Number _) -> pure ()
+                                    other -> expectationFailure $
+                                        "slot_no must be a number, got: " <> show other
+                                case Json.KeyMap.lookup "header_hash" o of
+                                    Just (Json.String _) -> pure ()
+                                    other -> expectationFailure $
+                                        "header_hash must be a string, got: " <> show other
+                            other ->
+                                expectationFailure $
+                                    "/checkpoints element is not an object: " <> show other
+                    Right other ->
+                        liftIO . expectationFailure $
+                            "GET /checkpoints did not return a JSON array, got: " <> show other
 
         session specification get "/matches" $ \assertJson endpoint -> do
             let schema = findSchema specification endpoint Http.status200
