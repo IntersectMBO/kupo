@@ -670,7 +670,13 @@ skippableContext prefix skippableSpec = do
     let cardanoNode = prefix <> " (cardano-node)"
     runIO ((,) <$> lookupEnv varCardanoNodeSocket <*> lookupEnv varCardanoNodeConfig) >>= \case
         (Just nodeSocket, Just nodeConfig) -> do
+            -- managerIdleConnectionCount = 0 disables the per-(host,port) idle
+            -- pool. Without this, when a multi-stage test (e.g. start → restart(s))
+            -- restarts kupo on the same port, the test client may reuse a pooled
+            -- socket from the previous stage that's still being served by a
+            -- leftover warp worker.
             manager <- runIO $ newManager defaultManagerSettings
+                { managerIdleConnectionCount = 0 }
             let defaultCfg = Configuration
                     { chainProducer = CardanoNode { nodeSocket, nodeConfig, networkParameters = () }
                     , databaseLocation = InMemory Nothing
@@ -692,7 +698,10 @@ skippableContext prefix skippableSpec = do
     runIO ((,) <$> lookupEnv varOgmiosHost <*> lookupEnv varOgmiosPort) >>= \case
         (Just ogmiosHost, Just (Prelude.read -> ogmiosPort)) -> do
             manager <- runIO $ newManager $
-                defaultManagerSettings { managerResponseTimeout = responseTimeoutNone }
+                defaultManagerSettings
+                    { managerResponseTimeout = responseTimeoutNone
+                    , managerIdleConnectionCount = 0
+                    }
             let defaultCfg = Configuration
                     { chainProducer = Ogmios { ogmiosHost, ogmiosPort, networkParameters = () }
                     , databaseLocation = InMemory Nothing
@@ -714,7 +723,10 @@ skippableContext prefix skippableSpec = do
     runIO ((,) <$> lookupEnv varHydraHost <*> lookupEnv varHydraPort) >>= \case
         (Just hydraHost, Just (Prelude.read -> hydraPort)) -> do
             manager <- runIO $ newManager $
-                defaultManagerSettings { managerResponseTimeout = responseTimeoutNone }
+                defaultManagerSettings
+                    { managerResponseTimeout = responseTimeoutNone
+                    , managerIdleConnectionCount = 0
+                    }
             let defaultCfg = Configuration
                     { chainProducer = Hydra {hydraHost, hydraPort}
                     , databaseLocation = InMemory Nothing
