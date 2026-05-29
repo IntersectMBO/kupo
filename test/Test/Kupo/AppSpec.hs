@@ -143,7 +143,8 @@ import Kupo.Data.Pattern
     , Result (..)
     )
 import Network.HTTP.Client
-    ( defaultManagerSettings
+    ( ManagerSettings (..)
+    , defaultManagerSettings
     , newManager
     )
 import Network.WebSockets
@@ -235,7 +236,13 @@ instance Exception UnusedFetchTipClient
 
 spec :: Spec
 spec = do
-    manager <- runIO (newManager defaultManagerSettings)
+    -- managerIdleConnectionCount = 0 disables the per-(host,port) idle pool.
+    -- Without it, QuickCheck shrinking can re-use the same random server port
+    -- across multiple iterations, and the test client may reuse a stale pooled
+    -- connection from the previous kupo that's still being served by its
+    -- leftover warp worker.
+    manager <- runIO $ newManager defaultManagerSettings
+        { managerIdleConnectionCount = 0 }
 
     chan <- runIO newTChanIO
 
