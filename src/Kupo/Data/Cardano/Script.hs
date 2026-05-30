@@ -119,6 +119,7 @@ scriptToJson script = encodeObject
                 Ledger.PlutusV1 -> Json.text "plutus:v1"
                 Ledger.PlutusV2 -> Json.text "plutus:v2"
                 Ledger.PlutusV3 -> Json.text "plutus:v3"
+                Ledger.PlutusV4 -> Json.text "plutus:v4"
       )
     ]
 
@@ -135,6 +136,7 @@ scriptToBytes =
                 Ledger.PlutusV1 -> withTag 1 script
                 Ledger.PlutusV2 -> withTag 2 script
                 Ledger.PlutusV3 -> withTag 3 script
+                Ledger.PlutusV4 -> withTag 4 script
 
 unsafeScriptFromBytes
     :: HasCallStack
@@ -156,6 +158,7 @@ scriptFromBytes (toLazy -> bytes) =
             1 -> plutusScript Ledger.PlutusV1 script
             2 -> plutusScript Ledger.PlutusV2 script
             3 -> plutusScript Ledger.PlutusV3 script
+            4 -> plutusScript Ledger.PlutusV4 script
             t -> Left (DecoderErrorUnknownTag "Script" (fromIntegral @Word8 @Word t))
   where
     plutusScript lang s =
