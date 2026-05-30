@@ -239,8 +239,6 @@ httpServer tr networkParameters withDatabase forceRollback fetchBlock patternsVa
                 readHealth
   where
     settings = Warp.defaultSettings
-        & Warp.setPort port
-        & Warp.setHost (fromString host)
         & Warp.setServerName "kupo"
         & Warp.setTimeout 120
         & Warp.setMaximumBodyFlush Nothing
@@ -279,7 +277,7 @@ openListeningSocket host port = do
             { Socket.addrFlags = [Socket.AI_PASSIVE, Socket.AI_NUMERICSERV]
             , Socket.addrSocketType = Socket.Stream
             }
-    addr : _ <- Socket.getAddrInfo (Just hints) (Just host) (Just (show port))
+    addr :| _ <- Socket.getAddrInfo (Just hints) (Just host) (Just (show port))
     sock <- Socket.socket (Socket.addrFamily addr) Socket.Stream Socket.defaultProtocol
     Socket.setSocketOption sock Socket.ReuseAddr 1
     Socket.bind sock (Socket.addrAddress addr)
