@@ -1,0 +1,223 @@
+---
+name: Continuous Integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+    - master
+  push:
+    branches:
+    - master
+
+env:
+  CARDANO_NODE_VERSION: "11.0.1"
+  NETWORK: preprod
+  S3_DB_PATH: s3://${{ secrets.AWS_S3_BUCKET }}/db-preprod
+
+jobs:
+  # TODO: switch back to this once Hydra reports check-runs to GitHub
+  # wait-for-hydra:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - name: Wait for Hydra build
+  #     env:
+  #       GH_TOKEN: ${{ github.token }}
+  #     run: |
+  #       check_name="ci/hydra-build:required"
+  #       while true; do
+  #         conclusion=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=$check_name" \
+  #           --paginate --jq '.check_runs[].conclusion')
+  #         case "$conclusion" in
+  #           success) echo "Hydra build succeeded"; exit 0 ;;
+  #           "") echo "Hydra build pending, waiting 30s..."; sleep 30 ;;
+  #           *) echo "Hydra build failed with: $conclusion"; exit 1 ;;
+  #         esac
+  #       done
+
+  integration-tests:
+    # needs:
+    # - wait-for-hydra
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        submodules: true
+        persist-credentials: false
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@b97f05dcb019ddea06450a50ef6203d2fdc19fee # v31
+      with:
+        extra_nix_config: |
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+          substituters = https://cache.iog.io/ https://cache.nixos.org/
+
+    # Temporary: poll the Nix cache directly until Hydra check-run reporting is fixed.
+    # Use the PR head SHA on pull_request events (not $GITHUB_SHA, which is the
+    # ephemeral merge commit GitHub creates server-side and that Hydra doesn't see).
+    # Falls back to $GITHUB_SHA on push events.
+    - name: Wait for kupo-tests in Hydra cache
+      env:
+        TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -o pipefail
+        echo "Target SHA: $TARGET_SHA"
+        if ! out=$(nix eval --raw "git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1#kupo-tests"); then
+          echo "nix eval failed"
+          exit 1
+        fi
+        if [ -z "$out" ]; then
+          echo "nix eval returned an empty path"
+          exit 1
+        fi
+        drv=$(nix eval --raw "git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1#kupo-tests.drvPath" 2>/dev/null || true)
+        echo "Resolved store path: $out"
+        echo "Derivation path:     $drv"
+        echo "Waiting for $out in cache..."
+        deadline=$((SECONDS + 1800))
+        while true; do
+          if nix path-info --refresh --store https://cache.iog.io "$out" >/dev/null 2>&1; then
+            echo "Found in cache"
+            break
+          fi
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Timed out after 30 minutes waiting for Hydra cache (path: $out)"
+            exit 1
+          fi
+          echo "Not in cache yet, waiting 30s..."
+          sleep 30
+        done
+
+    - name: Download test binary from Hydra cache
+      env:
+        TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        nix build "git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1#kupo-tests" \
+          --builders "" --max-jobs 0
+        mkdir -p bin
+        cp result/bin/unit bin/unit
+        chmod +x bin/unit
+
+    - name: Download cardano-node configs
+      env:
+        BASE_URL: https://raw.githubusercontent.com/input-output-hk/cardano-playground/refs/tags/node-${{ env.CARDANO_NODE_VERSION }}-config/docs/environments/preprod
+      run: |
+        mkdir -p config/preprod
+        cd config/preprod
+        for f in config.json topology.json peer-snapshot.json \
+                 byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json; do
+          curl -sfLO "$BASE_URL/$f"
+        done
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Restore cardano-node DB from S3
+      shell: bash {0}
+      env:
+        RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/db-preprod"
+        for attempt in 1 2 3; do
+          echo "S3 sync attempt $attempt..."
+          nix shell nixpkgs#s5cmd -c \
+            s5cmd --log error sync "$S3_DB_PATH/*" "$RUNNER_TEMP/db-preprod/" > /tmp/s3-sync.log 2>&1 &
+          pid=$!
+          while kill -0 "$pid" 2>/dev/null; do
+            du -sh "$RUNNER_TEMP/db-preprod" 2>/dev/null
+            sleep 15
+          done
+          wait "$pid"
+          rc=$?
+          echo "S3 sync attempt $attempt finished (exit $rc). Last 30 lines of log:"
+          tail -30 /tmp/s3-sync.log
+          if [ "$rc" -eq 0 ]; then
+            echo "S3 sync succeeded"
+            break
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            exit 1
+          fi
+          echo "Retrying..."
+        done
+
+    - name: Start cardano-node
+      id: node
+      env:
+        CONFDIR: ${{ github.workspace }}/config/preprod
+        RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/ipc"
+        docker run -d --name cardano-node \
+          -v "$RUNNER_TEMP/db-preprod:/db" \
+          -v "$RUNNER_TEMP/ipc:/ipc" \
+          -v "$CONFDIR:/config" \
+          "ghcr.io/intersectmbo/cardano-node:$CARDANO_NODE_VERSION" run \
+            --config /config/config.json \
+            --database-path /db \
+            --socket-path /ipc/node.socket \
+            --topology /config/topology.json
+
+    - name: Wait for cardano-node to sync
+      env:
+        RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        SOCKET="$RUNNER_TEMP/ipc/node.socket"
+        echo "Waiting for node socket at $SOCKET..."
+        deadline=$((SECONDS + 1800))
+        while [ ! -S "$SOCKET" ]; do
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Timed out waiting for node socket"
+            docker logs --tail 50 cardano-node
+            exit 1
+          fi
+          sleep 5
+        done
+        echo "Socket found, waiting for node to sync..."
+        while true; do
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Timed out waiting for node to sync"
+            docker logs --tail 50 cardano-node
+            exit 1
+          fi
+          sync_progress=$(docker exec cardano-node cardano-cli query tip --socket-path /ipc/node.socket --testnet-magic 1 2>/dev/null | jq -r '.syncProgress // empty' 2>/dev/null || true)
+          if [ -n "$sync_progress" ]; then
+            echo "Sync progress: ${sync_progress}%"
+            if [ "$(echo "$sync_progress >= 99.99" | bc -l)" -eq 1 ]; then
+              echo "Node synced"
+              break
+            fi
+          else
+            echo "Waiting for node to report sync progress..."
+          fi
+          sleep 10
+        done
+
+    - name: Run integration tests
+      env:
+        CARDANO_NODE_SOCKET: ${{ runner.temp }}/ipc/node.socket
+        CARDANO_NODE_CONFIG: ${{ github.workspace }}/config/preprod/config.json
+      # Skipped tests are known to be flaky.
+      run: |
+        sudo -E ./bin/unit \
+          --skip "Dynamically add pattern and restart to a past point when at the tip" \
+          --skip "Auto-magically restart when reaching the tip"
+
+    - name: Stop cardano-node
+      if: always() && steps.node.outcome != 'skipped'
+      run: |
+        docker stop cardano-node || true
+        docker rm cardano-node || true
+
+    - name: Save cardano-node DB to S3
+      if: always() && steps.node.outcome == 'success'
+      env:
+        RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        nix shell nixpkgs#s5cmd -c \
+          s5cmd --log error sync "$RUNNER_TEMP/db-preprod/" "$S3_DB_PATH/"

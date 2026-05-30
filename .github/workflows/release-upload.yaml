@@ -1,0 +1,129 @@
+---
+name: Post Release Upload
+# Uploads the kupo static binary as a GitHub release asset for any
+# tagged commit.
+
+on:
+  workflow_dispatch:
+  release:
+    types:
+    - published
+  push:
+    tags:
+    - '**'
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  # TODO: switch back to this once Hydra reports check-runs to GitHub
+  # wait-for-hydra:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - name: Wait for Hydra build
+  #     run: |
+  #       check_name="ci/hydra-build:required"
+  #       while true; do
+  #         conclusion=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=$check_name" \
+  #           --paginate --jq '.check_runs[].conclusion')
+  #         case "$conclusion" in
+  #           success) echo "Hydra build succeeded"; exit 0 ;;
+  #           "") echo "Hydra build pending, waiting 30s..."; sleep 30 ;;
+  #           *) echo "Hydra build failed with: $conclusion"; exit 1 ;;
+  #         esac
+  #       done
+
+  pull:
+    # needs:
+    # - wait-for-hydra
+    name: "Download Asset from the Cache"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install Nix
+      uses: cachix/install-nix-action@b97f05dcb019ddea06450a50ef6203d2fdc19fee # v31
+      with:
+        extra_nix_config: |
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+          substituters = https://cache.iog.io/ https://cache.nixos.org/
+
+    # Temporary: poll the Nix cache directly until Hydra check-run reporting is fixed.
+    # Use the PR head SHA on pull_request events (not $GITHUB_SHA, which is the
+    # ephemeral merge commit GitHub creates server-side and that Hydra doesn't see).
+    # Falls back to $GITHUB_SHA on push events.
+    - name: Wait for kupo-musl in Hydra cache
+      env:
+        TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -o pipefail
+        echo "Target SHA: $TARGET_SHA"
+        flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
+        if ! out=$(nix eval --raw "$flake_ref#packages.x86_64-linux.kupo-musl"); then
+          echo "nix eval failed"
+          exit 1
+        fi
+        if [ -z "$out" ]; then
+          echo "nix eval returned an empty path"
+          exit 1
+        fi
+        drv=$(nix eval --raw "$flake_ref#packages.x86_64-linux.kupo-musl.drvPath" 2>/dev/null || true)
+        echo "Resolved store path: $out"
+        echo "Derivation path:     $drv"
+        echo "Waiting for $out in cache..."
+        deadline=$((SECONDS + 1800))
+        while true; do
+          if nix path-info --refresh --store https://cache.iog.io "$out" >/dev/null 2>&1; then
+            echo "Found in cache"
+            break
+          fi
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Timed out after 30 minutes waiting for Hydra cache (path: $out)"
+            exit 1
+          fi
+          echo "Not in cache yet, waiting 30s..."
+          sleep 30
+        done
+
+    - name: Build
+      id: build
+      env:
+        TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
+        nix build --builders "" --max-jobs 0 "$flake_ref#packages.x86_64-linux.kupo-musl"
+        mkdir -p staging/bin
+        cp result/bin/kupo staging/bin/
+        version="${GITHUB_REF_NAME//[^a-zA-Z0-9._-]/}"
+        archive="kupo-${version}-x86_64-linux.tar.gz"
+        tar -czf "$archive" -C staging bin
+        echo "ARCHIVE=$archive" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      with:
+        name: ${{ github.sha }}-linux-amd64
+        path: ${{ steps.build.outputs.ARCHIVE }}
+        retention-days: 1
+
+  upload-assets:
+    needs:
+    - pull
+    name: "Upload Assets"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        merge-multiple: true
+
+    - name: Checksums
+      run: sha256sum kupo-*.tar.gz > kupo-sha256sums.txt
+
+    - name: Release
+      uses: input-output-hk/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v1
+      with:
+        draft: true
+        files: |
+          kupo-*-x86_64-linux.tar.gz
+          kupo-sha256sums.txt
