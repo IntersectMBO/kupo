@@ -99,7 +99,6 @@ import Kupo.Data.Cardano.Value
 
 import qualified Cardano.Chain.UTxO as Ledger.Byron
 import qualified Cardano.Ledger.Alonzo.Core as Ledger
-import qualified Cardano.Ledger.Alonzo.Tx as Ledger
 import qualified Cardano.Ledger.Alonzo.TxWits as Ledger
 import qualified Cardano.Ledger.Babbage.Core as Ledger
 import qualified Cardano.Ledger.Block as Ledger
@@ -195,6 +194,9 @@ instance IsBlock Block where
             foldrWithIndex (\ix -> fn ix . TransactionBabbage) result (txs ^. Ledger.txSeqBlockBodyL)
         BlockConway (ShelleyBlock (Ledger.Block _ txs) _) ->
             foldrWithIndex (\ix -> fn ix . TransactionConway) result (txs ^. Ledger.txSeqBlockBodyL)
+        BlockDijkstra _ ->
+            -- We don't support Dijkstra blocks.
+            error "kupo: Dijkstra blocks are not supported."
 
     spentInputs
         :: Transaction
