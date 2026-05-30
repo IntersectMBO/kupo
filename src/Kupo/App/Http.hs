@@ -50,7 +50,8 @@ import Kupo.Control.MonadSTM
     ( MonadSTM (..)
     )
 import Kupo.Control.MonadThrow
-    ( throwIO
+    ( bracket
+    , throwIO
     )
 import Kupo.Control.MonadTime
     ( DiffTime
@@ -196,6 +197,7 @@ import qualified Kupo.Data.Http.QuantityEncoding as QuantityEncoding
 import qualified Network.HTTP.Types.Header as Http
 import qualified Network.HTTP.Types.Status as Http
 import qualified Network.HTTP.Types.URI as Http
+import qualified Network.Socket as Socket
 import qualified Network.Wai.Handler.Warp as Warp
 
 --
@@ -219,19 +221,24 @@ httpServer
     -> Int
     -> IO ()
 httpServer tr networkParameters withDatabase forceRollback fetchBlock patternsVar readHealth host port =
-    Warp.runSettings settings
-        $ tracerMiddleware tr
-        $ app
-            networkParameters
-            withDatabaseWrapped
-            forceRollback
-            fetchBlock
-            patternsVar
-            readHealth
+    -- We deliberately own the listening socket via `bracket` rather than letting
+    -- `Warp.runSettings` open it internally. When kupo is cancelled mid-test
+    -- (via `race_`), warp's own teardown can fail to release the port promptly,
+    -- leaving the next stage's `bindPortTCP` to fail with EADDRINUSE. Bracketing
+    -- the socket here guarantees the fd is closed synchronously on any exit
+    -- path, including async cancel.
+    bracket (openListeningSocket host port) Socket.close $ \sock ->
+        Warp.runSettingsSocket settings sock
+            $ tracerMiddleware tr
+            $ app
+                networkParameters
+                withDatabaseWrapped
+                forceRollback
+                fetchBlock
+                patternsVar
+                readHealth
   where
     settings = Warp.defaultSettings
-        & Warp.setPort port
-        & Warp.setHost (fromString host)
         & Warp.setServerName "kupo"
         & Warp.setTimeout 120
         & Warp.setMaximumBodyFlush Nothing
@@ -261,6 +268,21 @@ httpServer tr networkParameters withDatabase forceRollback fetchBlock patternsVa
             Nothing -> do
                 logWith tr $ HttpFailedToAcquireDatabaseConnection { attempts, retryingIn }
                 threadDelay retryingIn >> retrying (next attempts) (2 * retryingIn) io
+
+-- | Open a TCP listening socket bound to host:port with SO_REUSEADDR set, so
+-- that the port can be rebound immediately after the socket is closed.
+openListeningSocket :: String -> Int -> IO Socket.Socket
+openListeningSocket host port = do
+    let hints = Socket.defaultHints
+            { Socket.addrFlags = [Socket.AI_PASSIVE, Socket.AI_NUMERICSERV]
+            , Socket.addrSocketType = Socket.Stream
+            }
+    addr :| _ <- Socket.getAddrInfo (Just hints) (Just host) (Just (show port))
+    sock <- Socket.socket (Socket.addrFamily addr) Socket.Stream Socket.defaultProtocol
+    Socket.setSocketOption sock Socket.ReuseAddr 1
+    Socket.bind sock (Socket.addrAddress addr)
+    Socket.listen sock 1024
+    pure sock
 
 --
 -- Router

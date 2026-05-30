@@ -1,9 +1,9 @@
 [submodule "config"]
 	path = config
-	url = git@github.com:input-output-hk/cardano-configurations.git
+	url = https://github.com/input-output-hk/cardano-configurations.git
 [submodule "test/ogmios"]
 	path = test/vectors/ogmios
-	url = git@github.com:cardanosolutions/ogmios.git
+	url = https://github.com/cardanosolutions/ogmios.git
 [submodule "test/vectors/hydra"]
 	path = test/vectors/hydra
-	url = git@github.com:input-output-hk/hydra.git
+	url = https://github.com/input-output-hk/hydra.git

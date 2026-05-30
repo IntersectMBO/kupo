@@ -1,11 +1,11 @@
-cabal-version: 1.12
+cabal-version: 3.0
 
 -- This file has been generated from package.yaml by hpack version 0.38.2.
 --
 -- see: https://github.com/sol/hpack
 
 name:           kupo
-version:        0
+version:        2.11.0.1
 synopsis:       A daemon for building lookup indexes from entities of the Cardano blockchain
 description:    Please see the README on GitHub at <https://github.com/cardanosolutions/kupo/tree/master/README.md>
 category:       Web
@@ -212,15 +212,16 @@ library
     , lens
     , lens-aeson
     , modern-uri
+    , network
     , network-mux
     , optparse-applicative
+    , cardano-diffusion
     , ouroboros-consensus
-    , ouroboros-consensus-cardano
-    , ouroboros-consensus-diffusion
-    , ouroboros-network
-    , ouroboros-network-api
-    , ouroboros-network-framework
-    , ouroboros-network-protocols
+    , ouroboros-consensus:cardano
+    , ouroboros-consensus:diffusion
+    , ouroboros-network:api
+    , ouroboros-network:framework
+    , ouroboros-network:protocols
     , prometheus
     , relude
     , resource-pool
@@ -395,7 +396,7 @@ test-suite unit
     , process
     , quickcheck-state-machine
     , relude
-    , si-timers
+    , io-classes:si-timers
     , sqlite-simple
     , stm
     , temporary

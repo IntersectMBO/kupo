@@ -85,6 +85,72 @@ It runs in constant memory and is blazing fast. Yet, its use-cases are limited. 
 | <a href="https://dcspark.github.io/carp/docs/intro/"><img width=150 src="https://dcspark.github.io/carp/img/logo.svg" alt="carp"/></a> | Rust | Carp is a modular blockchain indexer built on top of Oura; it synchronizes data in a PostgreSQL database based on behaviors described in _tasks_ (Rust standalone plugins). Some pre-defined common tasks are already available, other can be written on-demand to fit one's use case. As a primary interface, Carps fully relies on PostgreSQL. |
 | <a href="https://github.com/input-output-hk/cardano-db-sync#cardano-db-sync">cardano-db-sync</a> | Haskell | cardano-db-sync synchronizes ALL data from the Cardano blockchain, whereas Kupo focuses only on transaction outputs. This comes with obvious trade-offs in both on-disk storage, runtime requirements and performances. Kupo is usually an order of magnitude faster for retrieving outputs by address, stake address or policy id. Note also that like Carp, cardano-db-sync's primary interface is a PostgreSQL database whereas Kupo offers a higher-level HTTP API over JSON.
 
+## Development
+
+This project uses a [Nix flake](https://nixos.wiki/wiki/Flakes) for development and CI.
+
+### With direnv
+
+If you have [direnv](https://direnv.net/) installed, simply run:
+
+```sh
+direnv allow
+```
+
+This will automatically initialize git submodules and enter the development shell.
+
+### Without direnv
+
+```sh
+git submodule update --init --recursive
+nix develop "git+file:.?submodules=1" --impure
+```
+
+The `git submodule update` step is required *before* `nix develop` because the
+flake declares `self.submodules = true`; Nix's git fetcher reads submodule
+contents while fetching the flake source itself, so a fresh clone with no
+submodules initialised will fail to evaluate. The flake's `shellHook` re-runs
+the submodule update on each shell entry, but it can't bootstrap a cold clone
+since the hook only runs after the source fetch succeeds.
+
+### Building
+
+```sh
+# Dynamic glibc build (default)
+nix build .#kupo
+
+# Fully static musl build
+nix build .#kupo-musl
+
+# Library only
+nix build .#kupo-lib
+```
+
+`nix build` (no target) is equivalent to `nix build .#kupo`.
+
+### Without Nix (`cabal` via `make shell`)
+
+```sh
+git submodule update --init --recursive
+make shell            # enters GHC 9.6.5 devx environment (CardanoSolutions/devx)
+cabal update          # inside the shell, once per index-state bump
+cabal build all
+```
+
+#### Building from outside the repo
+
+You can build any of the flake outputs directly from a remote reference without
+cloning. The `?submodules=1` query is required so Nix's git fetcher pulls in
+the submodules that the build depends on:
+
+```sh
+# Build the default kupo executable from the latest master
+nix build -Lv 'git+https://github.com/IntersectMBO/kupo.git?submodules=1'
+
+# Specific tag or branch via ?ref=refs/heads/<branch> or ?ref=refs/tags/<tag>
+nix build -Lv 'git+https://github.com/IntersectMBO/kupo.git?submodules=1&ref=refs/tags/v2.11.0.1#kupo-musl'
+```
+
 ## Sponsors
 
 A big thank to [all our sponsors 💖](https://github.com/CardanoSolutions#-sponsors).

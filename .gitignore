@@ -18,3 +18,5 @@ dist-newstyle
 /dist
 *.tar.gz
 /cabal.project.local
+
+/.direnv
