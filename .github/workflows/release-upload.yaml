@@ -43,6 +43,16 @@ jobs:
     name: "Download Asset from the Cache"
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        persist-credentials: false
+
+    # For annotated tags, GITHUB_SHA is the SHA of the tag object itself,
+    # not of the commit it points at; HEAD after checkout is the commit.
+    - name: Resolve ref to commit SHA
+      run: echo "TARGET_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
     - name: Install Nix
       uses: cachix/install-nix-action@b97f05dcb019ddea06450a50ef6203d2fdc19fee # v31
       with:
@@ -51,12 +61,7 @@ jobs:
           substituters = https://cache.iog.io/ https://cache.nixos.org/
 
     # Temporary: poll the Nix cache directly until Hydra check-run reporting is fixed.
-    # Use the PR head SHA on pull_request events (not $GITHUB_SHA, which is the
-    # ephemeral merge commit GitHub creates server-side and that Hydra doesn't see).
-    # Falls back to $GITHUB_SHA on push events.
     - name: Wait for kupo-musl in Hydra cache
-      env:
-        TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       run: |
         set -o pipefail
         echo "Target SHA: $TARGET_SHA"
@@ -89,8 +94,6 @@ jobs:
 
     - name: Build
       id: build
-      env:
-        TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       run: |
         flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
         nix build --builders "" --max-jobs 0 "$flake_ref#packages.x86_64-linux.kupo-musl"

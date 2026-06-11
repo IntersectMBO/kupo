@@ -1,0 +1,147 @@
+---
+name: Container Image
+# Builds the kupo container image from the static musl binary built by
+# Hydra, and pushes it to GHCR.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+    - '**'
+
+permissions:
+  contents: read
+  checks: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: "Build and push container image"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    # Images are versioned after git tags, and only published for tags
+    # pointing at commits that are part of master.
+    - name: Check that the workflow runs on a tag
+      if: github.ref_type != 'tag'
+      run: |
+        echo "::error::This workflow must run on a git tag (got $GITHUB_REF); refusing to publish images."
+        exit 1
+
+    # For annotated tags, GITHUB_SHA is the SHA of the tag object itself,
+    # not of the commit it points at; HEAD after checkout is the commit.
+    - name: Resolve tag to commit SHA
+      run: echo "TARGET_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+    - name: Check that the tagged commit is on master
+      run: |
+        if ! git merge-base --is-ancestor "$TARGET_SHA" origin/master; then
+          echo "::error::Tag $GITHUB_REF_NAME points at $TARGET_SHA, which is not on master; refusing to publish images."
+          exit 1
+        fi
+
+    # The deadline is generous because CI includes a chain synchronization
+    # that can still be running when the tag is pushed.
+    - name: Wait for Continuous Integration to pass
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        check_name="integration-tests"
+        deadline=$((SECONDS + 3600))
+        while true; do
+          conclusions=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA/check-runs?check_name=$check_name" \
+            --jq '[.check_runs[].conclusion // "pending"] | unique | join(",")')
+          case "$conclusions" in
+            success) echo "Continuous Integration passed"; break ;;
+            ""|*pending*) echo "Continuous Integration pending, waiting 30s..." ;;
+            *) echo "::error::Continuous Integration concluded with: $conclusions"; exit 1 ;;
+          esac
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "::error::Timed out after 60 minutes waiting for Continuous Integration"
+            exit 1
+          fi
+          sleep 30
+        done
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@b97f05dcb019ddea06450a50ef6203d2fdc19fee # v31
+      with:
+        extra_nix_config: |
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+          substituters = https://cache.iog.io/ https://cache.nixos.org/
+
+    # Temporary: poll the Nix cache directly until Hydra check-run reporting
+    # is fixed.
+    - name: Wait for kupo-musl in Hydra cache
+      run: |
+        set -o pipefail
+        echo "Target SHA: $TARGET_SHA"
+        flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
+        if ! out=$(nix eval --raw "$flake_ref#packages.x86_64-linux.kupo-musl"); then
+          echo "nix eval failed"
+          exit 1
+        fi
+        if [ -z "$out" ]; then
+          echo "nix eval returned an empty path"
+          exit 1
+        fi
+        drv=$(nix eval --raw "$flake_ref#packages.x86_64-linux.kupo-musl.drvPath" 2>/dev/null || true)
+        echo "Resolved store path: $out"
+        echo "Derivation path:     $drv"
+        echo "Waiting for $out in cache..."
+        deadline=$((SECONDS + 1800))
+        while true; do
+          if nix path-info --refresh --store https://cache.iog.io "$out" >/dev/null 2>&1; then
+            echo "Found in cache"
+            break
+          fi
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Timed out after 30 minutes waiting for Hydra cache (path: $out)"
+            exit 1
+          fi
+          echo "Not in cache yet, waiting 30s..."
+          sleep 30
+        done
+
+    - name: Download kupo binary from Hydra cache
+      run: |
+        flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
+        nix build --builders "" --max-jobs 0 "$flake_ref#packages.x86_64-linux.kupo-musl"
+        mkdir -p bin
+        cp result/bin/kupo bin/kupo
+
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+    - name: Login to GHCR
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Compute image tags
+      id: tags
+      run: |
+        image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kupo"
+        version="${GITHUB_REF_NAME//[^a-zA-Z0-9._-]/}"
+        if ! [[ "$version" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
+          echo "::error::Cannot derive a valid image tag from git tag '$GITHUB_REF_NAME' (got '$version')."
+          exit 1
+        fi
+        echo "kupo=$image:$version,$image:latest" >> "$GITHUB_OUTPUT"
+
+    - name: Build and push kupo
+      uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+      with:
+        context: .
+        target: kupo
+        platforms: linux/amd64
+        provenance: false
+        push: true
+        tags: ${{ steps.tags.outputs.kupo }}
