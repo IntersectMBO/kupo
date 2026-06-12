@@ -1,6 +1,7 @@
 <p align="center">
   <img src="./docs/kupo.png" width="240" /> <img src=".github/preview.gif" width="480" />
 </p>
+asdf
 
 <p>
   <img align="left" src=".github/installation.png" width="300" alt="installation instructions" />
