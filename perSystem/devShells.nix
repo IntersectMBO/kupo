@@ -25,6 +25,16 @@
         # fails on `self.submodules = true` before this hook ever runs. See
         # README "Building from source" for the bootstrap command.
         git submodule update --init --recursive
+
+        # Symlink .claude -> .ai so Claude Code auto-discovers .ai/skills/.
+        # Runs on both `nix develop` and direnv (`use flake`). The symlink is
+        # gitignored.
+        if [ -d .claude ] && [ ! -L .claude ]; then
+          echo "WARNING: .claude is a real directory, not a symlink; leaving it as-is." >&2
+          echo "  Move its contents into .ai/ and remove .claude to enable .ai/skills auto-discovery." >&2
+        else
+          ln -sfn .ai .claude
+        fi
       '';
 
       withHoogle = false;

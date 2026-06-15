@@ -20,3 +20,6 @@ dist-newstyle
 /cabal.project.local
 
 /.direnv
+
+## Claude Code (symlink created by the devShell shellHook)
+/.claude
