@@ -60,54 +60,62 @@ jobs:
           trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
           substituters = https://cache.iog.io/ https://cache.nixos.org/
 
-    # Temporary: poll the Nix cache directly until Hydra check-run reporting is fixed.
+    # Temporary: poll the Nix cache directly until Hydra check-run reporting is
+    # fixed. Both architectures are built by Hydra; wait for each.
     - name: Wait for kupo-musl in Hydra cache
       run: |
         set -o pipefail
         echo "Target SHA: $TARGET_SHA"
         flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
-        if ! out=$(nix eval --raw "$flake_ref#packages.x86_64-linux.kupo-musl"); then
-          echo "nix eval failed"
-          exit 1
-        fi
-        if [ -z "$out" ]; then
-          echo "nix eval returned an empty path"
-          exit 1
-        fi
-        drv=$(nix eval --raw "$flake_ref#packages.x86_64-linux.kupo-musl.drvPath" 2>/dev/null || true)
-        echo "Resolved store path: $out"
-        echo "Derivation path:     $drv"
-        echo "Waiting for $out in cache..."
         deadline=$((SECONDS + 1800))
-        while true; do
-          if nix path-info --refresh --store https://cache.iog.io "$out" >/dev/null 2>&1; then
-            echo "Found in cache"
-            break
-          fi
-          if [ "$SECONDS" -ge "$deadline" ]; then
-            echo "Timed out after 30 minutes waiting for Hydra cache (path: $out)"
+        for sys in x86_64-linux aarch64-linux; do
+          if ! out=$(nix eval --raw "$flake_ref#packages.$sys.kupo-musl"); then
+            echo "nix eval failed for $sys"
             exit 1
           fi
-          echo "Not in cache yet, waiting 30s..."
-          sleep 30
+          if [ -z "$out" ]; then
+            echo "nix eval returned an empty path for $sys"
+            exit 1
+          fi
+          echo "[$sys] resolved store path: $out"
+          echo "[$sys] waiting for $out in cache..."
+          while true; do
+            if nix path-info --refresh --store https://cache.iog.io "$out" >/dev/null 2>&1; then
+              echo "[$sys] found in cache"
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out after 30 minutes waiting for Hydra cache ($sys path: $out)"
+              exit 1
+            fi
+            echo "[$sys] not in cache yet, waiting 30s..."
+            sleep 30
+          done
         done
 
     - name: Build
-      id: build
       run: |
         flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
-        nix build --builders "" --max-jobs 0 "$flake_ref#packages.x86_64-linux.kupo-musl"
-        mkdir -p staging/bin
-        cp result/bin/kupo staging/bin/
-        version="${GITHUB_REF_NAME//[^a-zA-Z0-9._-]/}"
-        archive="kupo-${version}-x86_64-linux.tar.gz"
-        tar -czf "$archive" -C staging bin
-        echo "ARCHIVE=$archive" >> "$GITHUB_OUTPUT"
+        # Replace any run of characters invalid in a tag with a single '-'
+        # (deleting them could collapse distinct refs), then trim separators.
+        version=$(printf '%s' "$GITHUB_REF_NAME" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[-.]+//; s/[-.]+$//')
+        if ! [[ "$version" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
+          echo "::error::Cannot derive a valid release version from git tag '$GITHUB_REF_NAME' (got '$version')."
+          exit 1
+        fi
+        # Release assets are named after the nix system (x86_64-linux /
+        # aarch64-linux), matching the upstream CardanoSolutions convention.
+        for sys in x86_64-linux aarch64-linux; do
+          nix build --builders "" --max-jobs 0 "$flake_ref#packages.$sys.kupo-musl" -o "result-$sys"
+          mkdir -p "staging-$sys/bin"
+          cp "result-$sys/bin/kupo" "staging-$sys/bin/"
+          tar -czf "kupo-${version}-${sys}.tar.gz" -C "staging-$sys" bin
+        done
 
     - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
       with:
-        name: ${{ github.sha }}-linux-amd64
-        path: ${{ steps.build.outputs.ARCHIVE }}
+        name: ${{ github.sha }}-linux
+        path: kupo-*-linux.tar.gz
         retention-days: 1
 
   upload-assets:
@@ -128,5 +136,5 @@ jobs:
       with:
         draft: true
         files: |
-          kupo-*-x86_64-linux.tar.gz
+          kupo-*-linux.tar.gz
           kupo-sha256sums.txt
