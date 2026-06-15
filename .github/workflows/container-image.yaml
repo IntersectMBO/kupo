@@ -145,7 +145,10 @@ jobs:
       id: tags
       run: |
         image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kupo"
-        version="${GITHUB_REF_NAME//[^a-zA-Z0-9._-]/}"
+        # Replace any run of characters invalid in a Docker tag with a single
+        # '-' (deleting them could collapse distinct refs to the same tag),
+        # then trim leading/trailing separators.
+        version=$(printf '%s' "$GITHUB_REF_NAME" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[-.]+//; s/[-.]+$//')
         if ! [[ "$version" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
           echo "::error::Cannot derive a valid image tag from git tag '$GITHUB_REF_NAME' (got '$version')."
           exit 1
