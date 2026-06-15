@@ -11,7 +11,8 @@ FROM --platform=${TARGETPLATFORM:-linux/amd64} busybox:1.35 as kupo
 LABEL name=kupo
 LABEL description="A fast, lightweight & configurable chain-index for Cardano."
 
-COPY ./bin/kupo /bin/kupo
+ARG TARGETARCH
+COPY ./bin/kupo-${TARGETARCH} /bin/kupo
 RUN chmod +x /bin/kupo
 
 COPY --from=certs /etc/ssl/certs /etc/ssl/certs

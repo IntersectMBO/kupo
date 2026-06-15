@@ -76,44 +76,53 @@ jobs:
           substituters = https://cache.iog.io/ https://cache.nixos.org/
 
     # Temporary: poll the Nix cache directly until Hydra check-run reporting
-    # is fixed.
+    # is fixed. Both architectures are built by Hydra; wait for each.
     - name: Wait for kupo-musl in Hydra cache
       run: |
         set -o pipefail
         echo "Target SHA: $TARGET_SHA"
         flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
-        if ! out=$(nix eval --raw "$flake_ref#packages.x86_64-linux.kupo-musl"); then
-          echo "nix eval failed"
-          exit 1
-        fi
-        if [ -z "$out" ]; then
-          echo "nix eval returned an empty path"
-          exit 1
-        fi
-        drv=$(nix eval --raw "$flake_ref#packages.x86_64-linux.kupo-musl.drvPath" 2>/dev/null || true)
-        echo "Resolved store path: $out"
-        echo "Derivation path:     $drv"
-        echo "Waiting for $out in cache..."
         deadline=$((SECONDS + 1800))
-        while true; do
-          if nix path-info --refresh --store https://cache.iog.io "$out" >/dev/null 2>&1; then
-            echo "Found in cache"
-            break
-          fi
-          if [ "$SECONDS" -ge "$deadline" ]; then
-            echo "Timed out after 30 minutes waiting for Hydra cache (path: $out)"
+        for sys in x86_64-linux aarch64-linux; do
+          if ! out=$(nix eval --raw "$flake_ref#packages.$sys.kupo-musl"); then
+            echo "nix eval failed for $sys"
             exit 1
           fi
-          echo "Not in cache yet, waiting 30s..."
-          sleep 30
+          if [ -z "$out" ]; then
+            echo "nix eval returned an empty path for $sys"
+            exit 1
+          fi
+          echo "[$sys] resolved store path: $out"
+          echo "[$sys] waiting for $out in cache..."
+          while true; do
+            if nix path-info --refresh --store https://cache.iog.io "$out" >/dev/null 2>&1; then
+              echo "[$sys] found in cache"
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out after 30 minutes waiting for Hydra cache ($sys path: $out)"
+              exit 1
+            fi
+            echo "[$sys] not in cache yet, waiting 30s..."
+            sleep 30
+          done
         done
 
-    - name: Download kupo binary from Hydra cache
+    # Place each architecture's static binary at the path the Dockerfile's
+    # `COPY ./bin/kupo-${TARGETARCH}` expects (amd64 / arm64).
+    - name: Download kupo binaries from Hydra cache
       run: |
         flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
-        nix build --builders "" --max-jobs 0 "$flake_ref#packages.x86_64-linux.kupo-musl"
         mkdir -p bin
-        cp result/bin/kupo bin/kupo
+        for pair in "x86_64-linux:amd64" "aarch64-linux:arm64"; do
+          sys="${pair%%:*}"
+          arch="${pair##*:}"
+          nix build --builders "" --max-jobs 0 "$flake_ref#packages.$sys.kupo-musl" -o "result-$arch"
+          cp "result-$arch/bin/kupo" "bin/kupo-$arch"
+        done
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
     - name: Set up Buildx
       uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -125,6 +134,13 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    # Each architecture is built and pushed on its own as '<base>-amd64' /
+    # '<base>-arm64' (so the single-arch images are tagged from the start, never
+    # left as orphaned 'sha256:...' versions), then the multi-arch manifest lists
+    # are composed from those per-arch digests in a later step.
+    #
+    #   kupo-base  the canonical tag the per-arch builds attach '-<arch>' to
+    #   kupo       a space-separated list of every final multi-arch tag
     - name: Compute image tags
       id: tags
       run: |
@@ -134,9 +150,14 @@ jobs:
           echo "::error::Cannot derive a valid image tag from git tag '$GITHUB_REF_NAME' (got '$version')."
           exit 1
         fi
-        echo "kupo=$image:$version,$image:latest" >> "$GITHUB_OUTPUT"
+        {
+          echo "kupo-base=$image:$version"
+          echo "kupo=$image:$version $image:latest"
+        } >> "$GITHUB_OUTPUT"
 
-    - name: Build and push kupo
+    # --- Per-architecture builds: each pushes a single '<base>-<arch>' tag. ---
+
+    - name: Build and push kupo (amd64)
       uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
       with:
         context: .
@@ -144,4 +165,29 @@ jobs:
         platforms: linux/amd64
         provenance: false
         push: true
-        tags: ${{ steps.tags.outputs.kupo }}
+        tags: ${{ steps.tags.outputs.kupo-base }}-amd64
+
+    - name: Build and push kupo (arm64)
+      uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+      with:
+        context: .
+        target: kupo
+        platforms: linux/arm64
+        provenance: false
+        push: true
+        tags: ${{ steps.tags.outputs.kupo-base }}-arm64
+
+    # --- Compose multi-arch manifest lists from the per-arch images. ---
+    # Every final tag becomes a manifest list pointing at the two already-tagged
+    # '<base>-amd64' / '<base>-arm64' images by digest. No new single-arch
+    # manifests are created, so nothing is left untagged.
+    - name: Compose multi-arch manifests
+      run: |
+        set -euo pipefail
+        base='${{ steps.tags.outputs.kupo-base }}'
+        repo="${base%:*}"
+        amd64=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$base-amd64" | jq -er .digest)
+        arm64=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$base-arm64" | jq -er .digest)
+        for tag in ${{ steps.tags.outputs.kupo }}; do
+          docker buildx imagetools create -t "$tag" "$repo@$amd64" "$repo@$arm64"
+        done
