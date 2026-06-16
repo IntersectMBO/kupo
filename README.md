@@ -18,6 +18,8 @@
 
 **Kupo** is fast, lightweight and configurable **chain-index** for the Cardano blockchain. It synchronizes data from the blockchain according to **patterns** matching addresses present in transaction outputs and builds a **lookup table** from matches to their associated **output references**, **values**, **datums** and **scripts**.
 
+> Pre-built, multi-arch (`linux/amd64`, `linux/arm64`) container images are published to GHCR: `ghcr.io/intersectmbo/kupo`.
+
 
 # Roadmap
 

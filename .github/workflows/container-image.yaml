@@ -1,0 +1,196 @@
+---
+name: Container Image
+# Builds the kupo container image from the static musl binary built by
+# Hydra, and pushes it to GHCR.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+    - '**'
+
+permissions:
+  contents: read
+  checks: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: "Build and push container image"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    # Images are versioned after git tags, and only published for tags
+    # pointing at commits that are part of master.
+    - name: Check that the workflow runs on a tag
+      if: github.ref_type != 'tag'
+      run: |
+        echo "::error::This workflow must run on a git tag (got $GITHUB_REF); refusing to publish images."
+        exit 1
+
+    # For annotated tags, GITHUB_SHA is the SHA of the tag object itself,
+    # not of the commit it points at; HEAD after checkout is the commit.
+    - name: Resolve tag to commit SHA
+      run: echo "TARGET_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+    - name: Check that the tagged commit is on master
+      run: |
+        if ! git merge-base --is-ancestor "$TARGET_SHA" origin/master; then
+          echo "::error::Tag $GITHUB_REF_NAME points at $TARGET_SHA, which is not on master; refusing to publish images."
+          exit 1
+        fi
+
+    # The deadline is generous because CI includes a chain synchronization
+    # that can still be running when the tag is pushed.
+    - name: Wait for Continuous Integration to pass
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        check_name="integration-tests"
+        deadline=$((SECONDS + 3600))
+        while true; do
+          conclusions=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA/check-runs?check_name=$check_name" \
+            --jq '[.check_runs[].conclusion // "pending"] | unique | join(",")')
+          case "$conclusions" in
+            success) echo "Continuous Integration passed"; break ;;
+            ""|*pending*) echo "Continuous Integration pending, waiting 30s..." ;;
+            *) echo "::error::Continuous Integration concluded with: $conclusions"; exit 1 ;;
+          esac
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "::error::Timed out after 60 minutes waiting for Continuous Integration"
+            exit 1
+          fi
+          sleep 30
+        done
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@b97f05dcb019ddea06450a50ef6203d2fdc19fee # v31
+      with:
+        extra_nix_config: |
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+          substituters = https://cache.iog.io/ https://cache.nixos.org/
+
+    # Temporary: poll the Nix cache directly until Hydra check-run reporting
+    # is fixed. Both architectures are built by Hydra; wait for each.
+    - name: Wait for kupo-musl in Hydra cache
+      run: |
+        set -o pipefail
+        echo "Target SHA: $TARGET_SHA"
+        flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
+        deadline=$((SECONDS + 1800))
+        for sys in x86_64-linux aarch64-linux; do
+          if ! out=$(nix eval --raw "$flake_ref#packages.$sys.kupo-musl"); then
+            echo "nix eval failed for $sys"
+            exit 1
+          fi
+          if [ -z "$out" ]; then
+            echo "nix eval returned an empty path for $sys"
+            exit 1
+          fi
+          echo "[$sys] resolved store path: $out"
+          echo "[$sys] waiting for $out in cache..."
+          while true; do
+            if nix path-info --refresh --store https://cache.iog.io "$out" >/dev/null 2>&1; then
+              echo "[$sys] found in cache"
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out after 30 minutes waiting for Hydra cache ($sys path: $out)"
+              exit 1
+            fi
+            echo "[$sys] not in cache yet, waiting 30s..."
+            sleep 30
+          done
+        done
+
+    # Place each architecture's static binary at the path the Dockerfile's
+    # `COPY ./bin/kupo-${TARGETARCH}` expects (amd64 / arm64).
+    - name: Download kupo binaries from Hydra cache
+      run: |
+        flake_ref="git+https://github.com/$GITHUB_REPOSITORY?rev=$TARGET_SHA&submodules=1"
+        mkdir -p bin
+        for pair in "x86_64-linux:amd64" "aarch64-linux:arm64"; do
+          sys="${pair%%:*}"
+          arch="${pair##*:}"
+          nix build --builders "" --max-jobs 0 "$flake_ref#packages.$sys.kupo-musl" -o "result-$arch"
+          cp "result-$arch/bin/kupo" "bin/kupo-$arch"
+        done
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+    - name: Login to GHCR
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Each architecture is built and pushed on its own as '<base>-amd64' /
+    # '<base>-arm64' (so the single-arch images are tagged from the start, never
+    # left as orphaned 'sha256:...' versions), then the multi-arch manifest lists
+    # are composed from those per-arch digests in a later step.
+    #
+    #   kupo-base  the canonical tag the per-arch builds attach '-<arch>' to
+    #   kupo       a space-separated list of every final multi-arch tag
+    - name: Compute image tags
+      id: tags
+      run: |
+        image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kupo"
+        # Replace any run of characters invalid in a Docker tag with a single
+        # '-' (deleting them could collapse distinct refs to the same tag),
+        # then trim leading/trailing separators.
+        version=$(printf '%s' "$GITHUB_REF_NAME" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[-.]+//; s/[-.]+$//')
+        if ! [[ "$version" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
+          echo "::error::Cannot derive a valid image tag from git tag '$GITHUB_REF_NAME' (got '$version')."
+          exit 1
+        fi
+        {
+          echo "kupo-base=$image:$version"
+          echo "kupo=$image:$version $image:latest"
+        } >> "$GITHUB_OUTPUT"
+
+    # --- Per-architecture builds: each pushes a single '<base>-<arch>' tag. ---
+
+    - name: Build and push kupo (amd64)
+      uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+      with:
+        context: .
+        target: kupo
+        platforms: linux/amd64
+        provenance: false
+        push: true
+        tags: ${{ steps.tags.outputs.kupo-base }}-amd64
+
+    - name: Build and push kupo (arm64)
+      uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+      with:
+        context: .
+        target: kupo
+        platforms: linux/arm64
+        provenance: false
+        push: true
+        tags: ${{ steps.tags.outputs.kupo-base }}-arm64
+
+    # --- Compose multi-arch manifest lists from the per-arch images. ---
+    # Every final tag becomes a manifest list pointing at the two already-tagged
+    # '<base>-amd64' / '<base>-arm64' images by digest. No new single-arch
+    # manifests are created, so nothing is left untagged.
+    - name: Compose multi-arch manifests
+      run: |
+        set -euo pipefail
+        base='${{ steps.tags.outputs.kupo-base }}'
+        repo="${base%:*}"
+        amd64=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$base-amd64" | jq -er .digest)
+        arm64=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$base-arm64" | jq -er .digest)
+        for tag in ${{ steps.tags.outputs.kupo }}; do
+          docker buildx imagetools create -t "$tag" "$repo@$amd64" "$repo@$arm64"
+        done
