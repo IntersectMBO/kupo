@@ -23,3 +23,7 @@ dist-newstyle
 
 ## Claude Code (symlink created by the devShell shellHook)
 /.claude
+
+## Local dev scripts (patch-nix-deps.sh stays tracked)
+/scripts/*
+!/scripts/patch-nix-deps.sh
