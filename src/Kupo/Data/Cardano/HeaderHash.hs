@@ -62,5 +62,5 @@ unsafeHeaderHashFromBytes
     :: ByteString
     -> HeaderHash Block
 unsafeHeaderHashFromBytes =
-    fromRawHash (Proxy @Block)
+    unsafeFromRawHash (Proxy @Block)
 {-# INLINABLE unsafeHeaderHashFromBytes #-}

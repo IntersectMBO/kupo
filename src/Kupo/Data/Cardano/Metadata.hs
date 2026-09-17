@@ -5,6 +5,10 @@ module Kupo.Data.Cardano.Metadata
 
 import Kupo.Prelude
 
+import Data.Array.Byte
+    ( ByteArray
+    )
+
 import Cardano.Ledger.Allegra.TxAuxData
     ( AllegraTxAuxData (..)
     )
@@ -35,6 +39,7 @@ import qualified Data.Aeson.Encoding as Json
 import qualified Data.Aeson.Key as Json.Key
 import qualified Data.Aeson.KeyMap as Json.KeyMap
 import qualified Data.Aeson.Types as Json
+import qualified Data.ByteString.Short.Internal as SBS
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
@@ -81,7 +86,7 @@ metadataToJson (AlonzoTxAuxData labels _ _) =
         Ledger.S txt ->
             encodeObject [("string", Json.text txt)]
         Ledger.B bytes ->
-            encodeObject [("bytes", Json.text $ encodeBase16 bytes)]
+            encodeObject [("bytes", Json.text $ encodeBase16 (byteArrayToByteString bytes))]
         Ledger.List xs ->
             encodeObject [("list", Json.list encodeMetadatum xs)]
         Ledger.Map xs ->
@@ -134,7 +139,7 @@ metadataFromJson = fmap mkMetadata . Json.withObject "Metadata"
         metadatumBytesFromJson o = do
             b <- (o .: "bytes")
               >>= either (fail . toString) pure . decodeBase16 . encodeUtf8 @Text
-            pure (Ledger.B b)
+            pure (Ledger.B (byteStringToByteArray b))
 
         metadatumListFromJson :: Json.Object -> Json.Parser Metadatum
         metadatumListFromJson o = do
@@ -188,3 +193,15 @@ fromConwayMetadata :: AlonzoTxAuxData ConwayEra -> Metadata
 fromConwayMetadata =
     identity
 {-# INLINABLE fromConwayMetadata #-}
+
+--
+-- Helpers
+--
+
+-- | Converting between 'ByteArray' (unpinned) and 'ByteString' (pinned) copies the
+-- bytes. Harmless: the ledger caps metadata byte strings at 64 bytes.
+byteArrayToByteString :: ByteArray -> ByteString
+byteArrayToByteString = fromShort . SBS.ShortByteString
+
+byteStringToByteArray :: ByteString -> ByteArray
+byteStringToByteArray = SBS.unShortByteString . toShort

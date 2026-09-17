@@ -8,6 +8,10 @@ module Test.Kupo.Data.Generators where
 
 import Kupo.Prelude
 
+import Kupo.Data.Cardano.Metadata
+    ( byteStringToByteArray
+    )
+
 import Data.Bits
     ( shiftL
     )
@@ -352,7 +356,7 @@ genMetadata = do
     genMetadatum = sized $ \case
         0 -> oneof
             [ I <$> arbitrary
-            , B <$> (choose (0, 16) >>= genBytes)
+            , B . byteStringToByteArray <$> (choose (0, 16) >>= genBytes)
             , S . T.pack <$> (chooseVector (0, 24) (elements ['a'..'z']))
             ]
         ((truncate @Double . log . fromIntegral) -> n) -> oneof
