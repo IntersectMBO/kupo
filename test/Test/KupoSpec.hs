@@ -194,12 +194,12 @@ import Kupo.Data.Health
     ( ConnectionStatus (..)
     , Health (..)
     )
+import System.Environment
+    ( getEnvironment
+    )
 import System.IO
     ( hClose
     , hGetLine
-    )
-import System.Environment
-    ( getEnvironment
     )
 
 import qualified Data.Aeson as Json
