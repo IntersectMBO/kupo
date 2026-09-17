@@ -18,3 +18,7 @@ dist-newstyle
 /dist
 *.tar.gz
 /cabal.project.local
+
+## Local dev scripts (patch-nix-deps.sh stays tracked)
+/scripts/*
+!/scripts/patch-nix-deps.sh
