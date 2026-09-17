@@ -99,7 +99,6 @@ import Kupo.Data.Cardano.Value
 
 import qualified Cardano.Chain.UTxO as Ledger.Byron
 import qualified Cardano.Ledger.Alonzo.Core as Ledger
-import qualified Cardano.Ledger.Alonzo.Tx as Ledger
 import qualified Cardano.Ledger.Alonzo.TxWits as Ledger
 import qualified Cardano.Ledger.Babbage.Core as Ledger
 import qualified Cardano.Ledger.Block as Ledger
@@ -209,22 +208,22 @@ instance IsBlock Block where
         TransactionMary tx ->
             tx ^. Ledger.bodyTxL . Ledger.inputsTxBodyL
         TransactionAlonzo tx ->
-            case tx ^. Ledger.isValidTxL of
-                Ledger.IsValid True ->
+            case tx ^. Ledger.isPhase2ValidTxL of
+                Ledger.Phase2Valid ->
                     tx ^. Ledger.bodyTxL . Ledger.inputsTxBodyL
-                Ledger.IsValid False ->
+                Ledger.Phase2Invalid ->
                     tx ^. Ledger.bodyTxL . Ledger.collateralInputsTxBodyL
         TransactionBabbage tx ->
-            case tx ^. Ledger.isValidTxL of
-                Ledger.IsValid True ->
+            case tx ^. Ledger.isPhase2ValidTxL of
+                Ledger.Phase2Valid ->
                     tx ^. Ledger.bodyTxL . Ledger.inputsTxBodyL
-                Ledger.IsValid False ->
+                Ledger.Phase2Invalid ->
                     tx ^. Ledger.bodyTxL . Ledger.collateralInputsTxBodyL
         TransactionConway tx ->
-            case tx ^. Ledger.isValidTxL of
-                Ledger.IsValid True ->
+            case tx ^. Ledger.isPhase2ValidTxL of
+                Ledger.Phase2Valid ->
                     tx ^. Ledger.bodyTxL . Ledger.inputsTxBodyL
-                Ledger.IsValid False ->
+                Ledger.Phase2Invalid ->
                     tx ^. Ledger.bodyTxL . Ledger.collateralInputsTxBodyL
       where
         transformByron (Ledger.Byron.TxInUtxo txId ix) =
@@ -274,10 +273,10 @@ instance IsBlock Block where
                 outs = body ^. Ledger.outputsTxBodyL
                 meta = tx ^. Ledger.auxDataTxL & strictMaybe emptyMetadata fromAlonzoMetadata
              in
-                case tx ^. Ledger.isValidTxL of
-                    Ledger.IsValid True ->
+                case tx ^. Ledger.isPhase2ValidTxL of
+                    Ledger.Phase2Valid ->
                         traverseAndTransform fromAlonzoOutput txId meta 0 outs
-                    Ledger.IsValid False ->
+                    Ledger.Phase2Invalid ->
                         []
         TransactionBabbage tx ->
             let
@@ -286,10 +285,10 @@ instance IsBlock Block where
                 outs = body ^. Ledger.outputsTxBodyL
                 meta = tx ^. Ledger.auxDataTxL & strictMaybe emptyMetadata fromBabbageMetadata
              in
-                case tx ^. Ledger.isValidTxL of
-                    Ledger.IsValid True ->
+                case tx ^. Ledger.isPhase2ValidTxL of
+                    Ledger.Phase2Valid ->
                         traverseAndTransform fromBabbageOutput txId meta 0 outs
-                    Ledger.IsValid False ->
+                    Ledger.Phase2Invalid ->
                         -- From Babbage's formal specification:
                         --
                         --   Note that the new collOuts function generates a single output
@@ -307,10 +306,10 @@ instance IsBlock Block where
                 outs = body ^. Ledger.outputsTxBodyL
                 meta = tx ^. Ledger.auxDataTxL & strictMaybe emptyMetadata fromConwayMetadata
              in
-                case tx ^. Ledger.isValidTxL of
-                    Ledger.IsValid True ->
+                case tx ^. Ledger.isPhase2ValidTxL of
+                    Ledger.Phase2Valid ->
                         traverseAndTransform identity txId meta 0 outs
-                    Ledger.IsValid False ->
+                    Ledger.Phase2Invalid ->
                         -- From Conway formal specification:
                         --
                         --   Note that the new collOuts function generates a single output
