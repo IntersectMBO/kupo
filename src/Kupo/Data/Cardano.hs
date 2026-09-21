@@ -194,9 +194,8 @@ instance IsBlock Block where
             foldrWithIndex (\ix -> fn ix . TransactionBabbage) result (txs ^. Ledger.txSeqBlockBodyL)
         BlockConway (ShelleyBlock (Ledger.Block _ txs) _) ->
             foldrWithIndex (\ix -> fn ix . TransactionConway) result (txs ^. Ledger.txSeqBlockBodyL)
-        BlockDijkstra _ ->
-            -- We don't support Dijkstra blocks.
-            error "kupo: Dijkstra blocks are not supported."
+        BlockDijkstra (ShelleyBlock (Ledger.Block _ txs) _) ->
+            foldrWithIndex (\ix -> fn ix . TransactionDijkstra) result (txs ^. Ledger.txSeqBlockBodyL)
 
     spentInputs
         :: Transaction
@@ -223,6 +222,12 @@ instance IsBlock Block where
                 Ledger.Phase2Invalid ->
                     tx ^. Ledger.bodyTxL . Ledger.collateralInputsTxBodyL
         TransactionConway tx ->
+            case tx ^. Ledger.isPhase2ValidTxL of
+                Ledger.Phase2Valid ->
+                    tx ^. Ledger.bodyTxL . Ledger.inputsTxBodyL
+                Ledger.Phase2Invalid ->
+                    tx ^. Ledger.bodyTxL . Ledger.collateralInputsTxBodyL
+        TransactionDijkstra tx ->
             case tx ^. Ledger.isPhase2ValidTxL of
                 Ledger.Phase2Valid ->
                     tx ^. Ledger.bodyTxL . Ledger.inputsTxBodyL
@@ -311,12 +316,29 @@ instance IsBlock Block where
              in
                 case tx ^. Ledger.isPhase2ValidTxL of
                     Ledger.Phase2Valid ->
-                        traverseAndTransform identity txId meta 0 outs
+                        traverseAndTransform fromConwayOutput txId meta 0 outs
                     Ledger.Phase2Invalid ->
                         -- From Conway formal specification:
                         --
                         --   Note that the new collOuts function generates a single output
                         --   with an index |txouts{txb}|.
+                        let start = fromIntegral (length outs) in
+                        case body ^. Ledger.collateralReturnTxBodyL of
+                            SNothing ->
+                                []
+                            SJust r  ->
+                                traverseAndTransform fromConwayOutput txId meta start (r :<| mempty)
+        TransactionDijkstra tx ->
+            let
+                body = tx ^. Ledger.bodyTxL
+                txId = Ledger.txIdTxBody @DijkstraEra body
+                outs = body ^. Ledger.outputsTxBodyL
+                meta = tx ^. Ledger.auxDataTxL & strictMaybe emptyMetadata identity
+             in
+                case tx ^. Ledger.isPhase2ValidTxL of
+                    Ledger.Phase2Valid ->
+                        traverseAndTransform identity txId meta 0 outs
+                    Ledger.Phase2Invalid ->
                         let start = fromIntegral (length outs) in
                         case body ^. Ledger.collateralReturnTxBodyL of
                             SNothing ->
@@ -383,6 +405,8 @@ instance IsBlock Block where
             fromBabbageData <$> Ledger.unTxDats (tx ^. Ledger.witsTxL . Ledger.datsTxWitsL)
         TransactionConway tx ->
             fromConwayData <$> Ledger.unTxDats (tx ^. Ledger.witsTxL . Ledger.datsTxWitsL)
+        TransactionDijkstra tx ->
+            fromDijkstraData <$> Ledger.unTxDats (tx ^. Ledger.witsTxL . Ledger.datsTxWitsL)
 
     witnessedScripts
         :: Transaction
@@ -415,6 +439,13 @@ instance IsBlock Block where
               & scriptsFromOutputs
                     (fromBabbageOutput <$> tx ^. Ledger.bodyTxL . Ledger.outputsTxBodyL)
         TransactionConway tx ->
+            ( fromConwayScript <$> tx ^. Ledger.witsTxL . Ledger.scriptTxWitsL
+            ) & strictMaybe identity
+                    (scriptFromAlonzoAuxiliaryData fromConwayScript)
+                    (tx ^. Ledger.auxDataTxL)
+              & scriptsFromOutputs
+                    (fromConwayOutput <$> tx ^. Ledger.bodyTxL . Ledger.outputsTxBodyL)
+        TransactionDijkstra tx ->
             ( tx ^. Ledger.witsTxL . Ledger.scriptTxWitsL
             ) & strictMaybe identity
                     (scriptFromAlonzoAuxiliaryData identity)
@@ -470,6 +501,12 @@ instance IsBlock Block where
                 SJust auxData ->
                     let meta = fromConwayMetadata auxData
                      in Just (hashMetadata meta, meta)
+        TransactionDijkstra tx ->
+            case tx ^. Ledger.auxDataTxL of
+                SNothing ->
+                    Nothing
+                SJust auxData ->
+                    Just (hashMetadata auxData, auxData)
 
     spendRedeemer
         :: Transaction
@@ -491,3 +528,5 @@ instance IsBlock Block where
                 Just (RedeemersBabbage (tx ^. Ledger.witsTxL . Ledger.rdmrsTxWitsL))
             TransactionConway tx ->
                 Just (RedeemersConway (tx ^. Ledger.witsTxL . Ledger.rdmrsTxWitsL))
+            TransactionDijkstra tx ->
+                Just (RedeemersDisjkstra (tx ^. Ledger.witsTxL . Ledger.rdmrsTxWitsL))
