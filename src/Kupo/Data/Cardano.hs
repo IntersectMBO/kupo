@@ -102,6 +102,8 @@ import qualified Cardano.Ledger.Alonzo.Core as Ledger
 import qualified Cardano.Ledger.Alonzo.TxWits as Ledger
 import qualified Cardano.Ledger.Babbage.Core as Ledger
 import qualified Cardano.Ledger.Block as Ledger
+import qualified Cardano.Ledger.Dijkstra.Core as Ledger
+import qualified Data.OMap.Strict as OMap
 import qualified Data.Set as Set
 
 -- IsBlock
@@ -195,7 +197,25 @@ instance IsBlock Block where
         BlockConway (ShelleyBlock (Ledger.Block _ txs) _) ->
             foldrWithIndex (\ix -> fn ix . TransactionConway) result (txs ^. Ledger.txSeqBlockBodyL)
         BlockDijkstra (ShelleyBlock (Ledger.Block _ txs) _) ->
-            foldrWithIndex (\ix -> fn ix . TransactionDijkstra) result (txs ^. Ledger.txSeqBlockBodyL)
+            foldrWithIndex (\ix -> fn ix . TransactionDijkstra . rejectSubTransactions) result (txs ^. Ledger.txSeqBlockBodyL)
+      where
+        -- Dijkstra introduces nested transactions: a top-level transaction may
+        -- carry sub-transactions, each with its own id, inputs and outputs but
+        -- no phase-2 validity flag or collateral of its own. Kupo folds one flat
+        -- sequence of transactions per block and stores the resulting index on
+        -- every output reference, so how sub-transactions are numbered (and how
+        -- a phase-2 invalid parent affects them) is a design decision that has
+        -- not been made yet. Until it is, fail loudly rather than silently
+        -- dropping their inputs and outputs from the index.
+        rejectSubTransactions
+            :: Ledger.Tx Ledger.TopTx DijkstraEra
+            -> Ledger.Tx Ledger.TopTx DijkstraEra
+        rejectSubTransactions tx
+            | OMap.null (tx ^. Ledger.bodyTxL . Ledger.subTransactionsTxBodyL) =
+                tx
+            | otherwise =
+                error $ "kupo: Dijkstra transaction " <> show (Ledger.txIdTx @DijkstraEra tx)
+                    <> " carries sub-transactions, which kupo does not index yet."
 
     spentInputs
         :: Transaction
