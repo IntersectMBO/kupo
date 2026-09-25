@@ -75,6 +75,7 @@ module Kupo.Prelude
     , AlonzoEra
     , BabbageEra
     , ConwayEra
+    , DijkstraEra
     , MostRecentEra
 
       -- * System
@@ -110,6 +111,9 @@ import Cardano.Ledger.Core
     ( ByronEra
     , Era
     , eraProtVerLow
+    )
+import Cardano.Ledger.Dijkstra
+    ( DijkstraEra
     )
 import Cardano.Ledger.Mary
     ( MaryEra
