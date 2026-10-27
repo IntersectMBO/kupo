@@ -8,10 +8,6 @@ module Test.Kupo.App.HttpSpec
     ( spec
     ) where
 
-import Kupo.Prelude hiding
-    ( get
-    , put
-    )
 import Data.Aeson
     ( (.!=)
     , (.:)
@@ -77,6 +73,10 @@ import Kupo.Data.PartialBlock
 import Kupo.Data.Pattern
     ( Pattern
     , patternToText
+    )
+import Kupo.Prelude hiding
+    ( get
+    , put
     )
 import Network.HTTP.Media.MediaType
     ( MediaType

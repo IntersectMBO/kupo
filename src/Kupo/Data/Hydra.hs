@@ -12,9 +12,6 @@ import Cardano.Crypto.Hash
 import Cardano.Ledger.Alonzo.Scripts
     ( AsIx (..)
     )
-import Cardano.Ledger.Conway.Scripts
-    ( ConwayPlutusPurpose (..)
-    )
 import Cardano.Ledger.Alonzo.TxWits
     ( unRedeemers
     , unTxDats
@@ -27,6 +24,9 @@ import Cardano.Ledger.Api
     , rdmrsTxWitsL
     , scriptTxWitsL
     , witsTxL
+    )
+import Cardano.Ledger.Conway.Scripts
+    ( ConwayPlutusPurpose (..)
     )
 import Cardano.Ledger.Core
     ( TopTx
@@ -53,6 +53,7 @@ import Kupo.Data.Cardano
     , Value
     , binaryDataFromBytes
     , fromConwayData
+    , fromConwayOutput
     , fromConwayScript
     , getOutputIndex
     , getTransactionId
@@ -202,7 +203,7 @@ decodePartialTransaction = Json.withObject "PartialTransaction" $ \o -> do
     let body' = tx ^. bodyTxL
     let id = Ledger.txIdTxBody body'
     let wits' = tx ^. witsTxL
-    let outputs' = toList (body' ^. outputsTxBodyL)
+    let outputs' = toList (fromConwayOutput <$> body' ^. outputsTxBodyL)
 
     pure PartialTransaction
         { id

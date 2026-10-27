@@ -12,8 +12,10 @@
         cabal = "latest";
         ghcid = "latest";
         haskell-language-server = {
-          src = inputs.haskellNix.inputs."hls-2.10";
+          src = inputs.haskellNix.inputs."hls-2.12";
           configureArgs = "--disable-benchmarks --disable-tests";
+          # ghc-lib-parser 9.12.2 fails to build against GHC 9.12.4 (GHC.Internal.TH.Ppr moved).
+          cabalProjectLocal = "constraints: ghc-lib-parser >=9.12.3";
         };
       };
 
