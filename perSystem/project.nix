@@ -26,7 +26,7 @@
           ];
       };
       name = "kupo";
-      compiler-nix-name = lib.mkDefault "ghc984";
+      compiler-nix-name = lib.mkDefault "ghc9124";
 
       inputMap = {
         "https://input-output-hk.github.io/cardano-haskell-packages" = inputs.CHaP;
@@ -35,7 +35,7 @@
       # Mirrors source-repository-package entries in cabal.project so
       # haskell.nix can fetch them deterministically.
       sha256map = {
-        "https://github.com/CardanoSolutions/ogmios"."ae876badb138f42dcd6d2389734b0c15502684ed" = "sha256-xkOfOdX6Dxi7+VW78Tk3n3MoguIg39pKdxiNVfdeEwE=";
+        "https://github.com/CardanoSolutions/ogmios"."42c2bacd2d9c00087b5e29c98ee96c43ee857424" = "sha256-1VptE6HSuT2U+NMw7HLb5X1PqqrYpsOkl4tWHk5ygG4=";
         "https://github.com/CardanoSolutions/sqlite-simple"."08015be2ee52a7e67159b6b0c476bd3e0a2e0b87" = "1ahpjycsfibv09kzgfbm4i55z4nz1p3rvnmfwwwraxy45n1ivl85";
         "https://github.com/CardanoSolutions/direct-sqlite"."2b14a78cb73805e2e5d84354230e872a223faa39" = "1lwaariy0zjjh006ll1zbpdi9sphyqmcbbxhb0rj99nii5s91fd7";
         "https://github.com/CardanoSolutions/text-ansi"."e204822d2f343b2d393170a2ec46ee935571345c" = "16ki7wsf7wivxn65acv4hxwfrzmphq4zp61lpxwzqkgrg8shi8bv";
@@ -59,7 +59,7 @@
             }"' \
               --replace-fail '    ( gitRevisionTH' '    ('
           '';
-          # GHC 9.8 enabled -Wx-partial by default; kupo was written for
+          # GHC 9.8+ enables -Wx-partial by default; kupo was written for
           # 9.6 and uses `Prelude.head` in a handful of test spots.
           # Silence it under -Werror until the source is updated.
           packages.kupo.components.tests.unit.ghcOptions = ["-Wno-x-partial"];

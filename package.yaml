@@ -63,6 +63,7 @@ library:
     - bytestring
     - cardano-crypto-class
     - cardano-crypto-wrapper
+    - cardano-data
     - cardano-ledger-allegra
     - cardano-ledger-alonzo
     - cardano-ledger-api
@@ -71,6 +72,7 @@ library:
     - cardano-ledger-byron
     - cardano-ledger-conway
     - cardano-ledger-core
+    - cardano-ledger-dijkstra
     - cardano-ledger-mary
     - cardano-ledger-shelley
     - cardano-slotting
@@ -91,6 +93,7 @@ library:
     - lens
     - lens-aeson
     - modern-uri
+    - network
     - network-mux
     - optparse-applicative
     - cardano-diffusion

@@ -6,7 +6,9 @@ N/A
 
 #### Changed
 
-- Bumped internal dependencies to cardano-node==10.5.1
+- Kupo now requires cardano-node 11.1 or later. It talks to the node over node-to-client version 23 only, so older nodes are no longer supported.
+
+- Kupo is now built with GHC 9.12.
 
 - Fixed network synchronisation calculations (see [#191](https://github.com/CardanoSolutions/kupo/issues/191)).
 

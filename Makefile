@@ -1,6 +1,6 @@
 OUT := dist
 
-GHC := 9.6.5
+GHC := 9.12.4
 STYLISH_HASKELL_VERSION := 0.14.5.0
 
 # Default network for snapshots.
@@ -9,7 +9,7 @@ NETWORK := preview
 OS := $(shell uname -s | sed 's/Linux/linux/' | sed 's/Darwin/macos/')
 GHC_OS := $(shell uname -s | sed 's/Linux/linux/' | sed 's/Darwin/osx/')
 ARCH := $(shell uname -m | sed 's/X86/x86_64/' | sed 's/arm64/aarch64/')
-NIX_GHC := $(shell echo $(GHC) | sed 's/^\([0-9]\)\.\([0-9]\)\..*/\1\2/')
+NIX_GHC := $(shell echo $(GHC) | sed 's/^\([0-9]*\)\.\([0-9]*\)\..*/\1\2/')
 NIX_SHELL := github:CardanoSolutions/devx\#ghc$(NIX_GHC)-static-minimal-iog
 NIX_OPTS := --no-write-lock-file --refresh
 VERSION := $(shell cat package.yaml| grep "version:" | sed "s/[^0-9]*\([0-9]\)\(.[0-9].[0-9]\)*\(-.*\)*/\1\2\3/")

@@ -134,7 +134,7 @@ nix build .#kupo-lib
 
 ```sh
 git submodule update --init --recursive
-make shell            # enters GHC 9.6.5 devx environment (CardanoSolutions/devx)
+make shell            # enters GHC 9.12.4 devx environment (CardanoSolutions/devx)
 cabal update          # inside the shell, once per index-state bump
 cabal build all
 ```

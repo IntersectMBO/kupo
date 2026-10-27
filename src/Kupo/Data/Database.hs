@@ -119,7 +119,7 @@ pointFromRow
     -> App.Point
 pointFromRow row = App.BlockPoint
     (App.SlotNo (checkpointSlotNo row))
-    (fromShortRawHash (Proxy @App.Block) $ toShort $ checkpointHeaderHash row)
+    (unsafeFromShortRawHash (Proxy @App.Block) $ toShort $ checkpointHeaderHash row)
 {-# INLINABLE pointFromRow #-}
 
 pointToRow
