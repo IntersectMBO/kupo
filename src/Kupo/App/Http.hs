@@ -814,6 +814,7 @@ handleGetMetadata baseHeaders slotArg queryParams Database{..} fetchBlock =
                         ) : baseHeaders
                 atomically $ putTMVar response $ responseStreamJson headers metadataToJson' $
                     \yield done -> do
+                        either throwIO pure (checkSubTransactions blk)
                         traverse_ yield $ foldBlock
                             (\ix tx ->
                                 if isNothing filterBy || Just (getTransactionId tx) == filterBy then

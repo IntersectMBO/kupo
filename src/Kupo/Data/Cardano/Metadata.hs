@@ -5,6 +5,10 @@ module Kupo.Data.Cardano.Metadata
 
 import Kupo.Prelude
 
+import Data.Array.Byte
+    ( ByteArray
+    )
+
 import Cardano.Ledger.Allegra.TxAuxData
     ( AllegraTxAuxData (..)
     )
@@ -29,18 +33,20 @@ import Ouroboros.Consensus.Util
 import qualified Cardano.Ledger.Allegra.Scripts as Ledger.Allegra
 import qualified Cardano.Ledger.Api.Era as Ledger
 import qualified Cardano.Ledger.Core as Ledger
+import qualified Cardano.Ledger.Dijkstra.Scripts as Ledger.Dijkstra
 import qualified Cardano.Ledger.Shelley.TxAuxData as Ledger
 import qualified Data.Aeson as Json
 import qualified Data.Aeson.Encoding as Json
 import qualified Data.Aeson.Key as Json.Key
 import qualified Data.Aeson.KeyMap as Json.KeyMap
 import qualified Data.Aeson.Types as Json
+import qualified Data.ByteString.Short.Internal as SBS
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
 
 type Metadata =
-    AlonzoTxAuxData ConwayEra
+    AlonzoTxAuxData DijkstraEra
 
 emptyMetadata :: Metadata
 emptyMetadata =
@@ -68,7 +74,7 @@ metadataToText =
 metadataFromText :: Text -> Maybe Metadata
 metadataFromText txt = do
     bytes <- eitherToMaybe $ decodeBase16 (encodeUtf8 txt)
-    eitherToMaybe $ decodeCborAnn @ConwayEra "Metadata" decCBOR (toLazy bytes)
+    eitherToMaybe $ decodeCborAnn @DijkstraEra "Metadata" decCBOR (toLazy bytes)
 
 metadataToJson :: Metadata -> Json.Encoding
 metadataToJson (AlonzoTxAuxData labels _ _) =
@@ -81,7 +87,7 @@ metadataToJson (AlonzoTxAuxData labels _ _) =
         Ledger.S txt ->
             encodeObject [("string", Json.text txt)]
         Ledger.B bytes ->
-            encodeObject [("bytes", Json.text $ encodeBase16 bytes)]
+            encodeObject [("bytes", Json.text $ encodeBase16 (byteArrayToByteString bytes))]
         Ledger.List xs ->
             encodeObject [("list", Json.list encodeMetadatum xs)]
         Ledger.Map xs ->
@@ -134,7 +140,7 @@ metadataFromJson = fmap mkMetadata . Json.withObject "Metadata"
         metadatumBytesFromJson o = do
             b <- (o .: "bytes")
               >>= either (fail . toString) pure . decodeBase16 . encodeUtf8 @Text
-            pure (Ledger.B b)
+            pure (Ledger.B (byteStringToByteArray b))
 
         metadatumListFromJson :: Json.Object -> Json.Parser Metadatum
         metadatumListFromJson o = do
@@ -166,25 +172,37 @@ fromShelleyMetadata (ShelleyTxAuxData labels) =
 
 fromAllegraMetadata :: AllegraTxAuxData AllegraEra -> Metadata
 fromAllegraMetadata (AllegraTxAuxData labels timelocks) =
-    AlonzoTxAuxData labels (Ledger.Allegra.translateTimelock <$> timelocks) mempty
+    AlonzoTxAuxData labels (Ledger.Dijkstra.upgradeTimelock . Ledger.Allegra.translateTimelock <$> timelocks) mempty
 {-# INLINABLE fromAllegraMetadata #-}
 
 fromMaryMetadata :: AllegraTxAuxData MaryEra -> Metadata
 fromMaryMetadata (AllegraTxAuxData labels timelocks) =
-    AlonzoTxAuxData labels (Ledger.Allegra.translateTimelock <$> timelocks) mempty
+    AlonzoTxAuxData labels (Ledger.Dijkstra.upgradeTimelock . Ledger.Allegra.translateTimelock <$> timelocks) mempty
 {-# INLINABLE fromMaryMetadata #-}
 
 fromAlonzoMetadata :: AlonzoTxAuxData AlonzoEra -> Metadata
 fromAlonzoMetadata =
-    Ledger.upgradeTxAuxData . Ledger.upgradeTxAuxData
+    fromConwayMetadata . Ledger.upgradeTxAuxData . Ledger.upgradeTxAuxData
 {-# INLINABLE fromAlonzoMetadata #-}
 
 fromBabbageMetadata :: AlonzoTxAuxData BabbageEra -> Metadata
 fromBabbageMetadata =
-    Ledger.upgradeTxAuxData
+    fromConwayMetadata . Ledger.upgradeTxAuxData
 {-# INLINABLE fromBabbageMetadata #-}
 
 fromConwayMetadata :: AlonzoTxAuxData ConwayEra -> Metadata
-fromConwayMetadata =
-    identity
+fromConwayMetadata (AlonzoTxAuxData labels timelocks plutus) =
+    AlonzoTxAuxData labels (Ledger.Dijkstra.upgradeTimelock <$> timelocks) plutus
 {-# INLINABLE fromConwayMetadata #-}
+
+--
+-- Helpers
+--
+
+-- | Converting between 'ByteArray' (unpinned) and 'ByteString' (pinned) copies the
+-- bytes. Harmless: the ledger caps metadata byte strings at 64 bytes.
+byteArrayToByteString :: ByteArray -> ByteString
+byteArrayToByteString = fromShort . SBS.ShortByteString
+
+byteStringToByteArray :: ByteString -> ByteArray
+byteStringToByteArray = SBS.unShortByteString . toShort

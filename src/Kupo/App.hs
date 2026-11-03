@@ -113,6 +113,7 @@ import Kupo.Data.Cardano
     , SlotNo (..)
     , Tip
     , TransactionId
+    , checkSubTransactions
     , distanceToTip
     , getPoint
     , getPointSlotNo
@@ -513,11 +514,13 @@ rollForwardAll
     :: forall m block.
         ( MonadSTM m
         , MonadLog m
+        , MonadThrow m
         , Monad (DBTransaction m)
         , IsBlock block
         )
     => RollForward m block
 rollForwardAll tr inputManagement notifyTip Database{..} patterns blks = do
+    forM_ blks (either throwIO pure . checkSubTransactions . snd)
     let (lastKnownTip, lastKnownBlk) = last blks
     let lastKnownPoint = getPoint lastKnownBlk
     let lastKnownSlot = getPointSlotNo lastKnownPoint
@@ -581,6 +584,7 @@ rollForwardUntil
     :: forall m block.
         ( MonadSTM m
         , MonadLog m
+        , MonadThrow m
         , Monad (DBTransaction m)
         , IsBlock block
         )

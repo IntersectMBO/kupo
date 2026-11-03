@@ -186,6 +186,7 @@ library
     , bytestring
     , cardano-crypto-class
     , cardano-crypto-wrapper
+    , cardano-data
     , cardano-diffusion
     , cardano-ledger-allegra
     , cardano-ledger-alonzo
@@ -195,6 +196,7 @@ library
     , cardano-ledger-byron
     , cardano-ledger-conway
     , cardano-ledger-core
+    , cardano-ledger-dijkstra
     , cardano-ledger-mary
     , cardano-ledger-shelley
     , cardano-slotting

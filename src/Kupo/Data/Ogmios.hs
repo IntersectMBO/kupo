@@ -199,8 +199,11 @@ decodeBlock = Json.withObject "Block" $ \o -> do
     slot <- o .:? "slot" >>= \case
         Just slot -> pure slot
         Nothing -> o .: "height"
-    txs <- o .:? "transactions" .!= []
-    PartialBlock (BlockPoint (SlotNo slot) id) <$> traverse decodePartialTransaction txs
+    isDijkstraBlock <- (== Just ("dijkstra" :: Text)) <$> o .:? "era"
+    -- Ogmios serialises Dijkstra transactions as stubs, which do not decode.
+    txs <- if isDijkstraBlock then pure [] else o .:? "transactions" .!= []
+    blockBody <- traverse decodePartialTransaction txs
+    pure PartialBlock { blockPoint = BlockPoint (SlotNo slot) id, blockBody, isDijkstraBlock }
 
 decodePartialTransaction
     :: Json.Value

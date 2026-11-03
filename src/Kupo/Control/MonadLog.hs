@@ -41,6 +41,7 @@ import Control.Monad.Class.MonadTime
     )
 import Control.Tracer
     ( Tracer (..)
+    , mkTracer
     , natTracer
     , nullTracer
     , traceWith
@@ -135,7 +136,7 @@ withTracers h version tracers action = do
         :: Writer
         -> TMVar IO ()
         -> Tracer IO SomeMsg
-    tracer say lock = Tracer $ \someMsg@(SomeMsg minSeverity _ msg) -> do
+    tracer say lock = mkTracer $ \someMsg@(SomeMsg minSeverity _ msg) -> do
         let severity = getSeverityAnnotation msg
         when (severity >= minSeverity) $ liftIO $ withTMVar lock $ \() -> do
             threadId <- myThreadId
