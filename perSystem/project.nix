@@ -26,7 +26,7 @@
           ];
       };
       name = "kupo";
-      compiler-nix-name = lib.mkDefault "ghc984";
+      compiler-nix-name = lib.mkDefault "ghc9124";
 
       inputMap = {
         "https://input-output-hk.github.io/cardano-haskell-packages" = inputs.CHaP;
@@ -59,7 +59,7 @@
             }"' \
               --replace-fail '    ( gitRevisionTH' '    ('
           '';
-          # GHC 9.8 enabled -Wx-partial by default; kupo was written for
+          # GHC 9.8+ enables -Wx-partial by default; kupo was written for
           # 9.6 and uses `Prelude.head` in a handful of test spots.
           # Silence it under -Werror until the source is updated.
           packages.kupo.components.tests.unit.ghcOptions = ["-Wno-x-partial"];

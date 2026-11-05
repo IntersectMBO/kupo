@@ -8,6 +8,8 @@ N/A
 
 - Bumped internal dependencies to cardano-node==10.5.1
 
+- Kupo is now built with GHC 9.12.
+
 - Fixed network synchronisation calculations (see [#191](https://github.com/CardanoSolutions/kupo/issues/191)).
 
 #### Removed
