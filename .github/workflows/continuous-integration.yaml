@@ -11,7 +11,7 @@ on:
     - master
 
 env:
-  CARDANO_NODE_VERSION: "11.0.1"
+  CARDANO_NODE_VERSION: "11.1.3"
   NETWORK: preprod
   S3_DB_PATH: s3://${{ secrets.AWS_S3_BUCKET }}/db-preprod
 

@@ -24,6 +24,7 @@ import Kupo.Data.Cardano
     , Script
     , ScriptHash
     , TransactionId
+    , UnsupportedSubTransactions (..)
     , emptyMetadata
     )
 
@@ -35,6 +36,11 @@ import qualified Data.Set as Set
 data PartialBlock = PartialBlock
     { blockPoint :: !Point
     , blockBody :: ![PartialTransaction]
+    -- ^ The decoded transactions, empty for a Dijkstra block.
+    , isDijkstraBlock :: !Bool
+    -- ^ Whether this is a Dijkstra block whose transactions were not decoded.
+    --   Ogmios sends Dijkstra transactions without their bodies, and Hydra
+    --   decodes Conway transactions only.
     } deriving (Eq, Show)
 
 -- | A partial transaction, analogous to 'PartialBlock', trimmed down to the
@@ -63,6 +69,10 @@ instance IsBlock PartialBlock where
 
     foldBlock fn result =
         foldrWithIndex fn result . blockBody
+
+    checkSubTransactions PartialBlock{blockPoint, isDijkstraBlock} =
+        when isDijkstraBlock $
+            Left (UnverifiableSubTransactions blockPoint)
 
     mapMaybeOutputs fn tx =
         let meta = maybe emptyMetadata snd (metadata tx)

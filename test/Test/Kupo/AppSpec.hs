@@ -194,7 +194,7 @@ import Test.QuickCheck.Monadic
     , run
     )
 import Test.QuickCheck.Property
-    ( withMaxSuccess
+    ( withNumTests
     )
 import Test.StateMachine
     ( CommandNames
@@ -249,7 +249,7 @@ spec = do
     maxSuccess <- maybe 30 Prelude.read
         <$> runIO (lookupEnv varStateMachineIterations)
 
-    prop "State-Machine" $ withMaxSuccess maxSuccess $
+    prop "State-Machine" $ withNumTests maxSuccess $
       forAll genInputManagement $ \inputManagement -> do
         forAll genServerPort $ \serverPort -> do
            let httpClient = newHttpClientWith manager (serverHost, serverPort) (\_ -> pure ())
@@ -739,7 +739,7 @@ genContinuingBlock utxo txs previousTip = do
     blockPoint <- BlockPoint (next (getPointSlotNo previousTip)) <$> genHeaderHash
     (txs', utxo') <- runStateT (genTransactionSublist txs) utxo
     blockBody <- (txs' <>) <$> evalStateT genPartialTransactions utxo'
-    pure PartialBlock { blockPoint, blockBody }
+    pure PartialBlock { blockPoint, blockBody, isDijkstraBlock = False }
 
 -- | Generate a list of transactions using and modifying a given utxo. The
 -- generation stops when there's no more utxos or, arbitrarily (1 chance out of

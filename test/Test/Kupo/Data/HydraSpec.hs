@@ -32,7 +32,7 @@ import Test.QuickCheck
     ( Property
     , conjoin
     , counterexample
-    , withMaxSuccess
+    , withNumTests
     )
 import Test.QuickCheck.Monadic
     ( assert
@@ -54,7 +54,7 @@ spec = parallel $ do
           let dir = "./test/vectors/hydra/hydra-node/golden/ServerOutput"
           files <- runIO (listDirectory dir) <&> map (dir </>)
           prop "can decode test vectors" $ do
-              withMaxSuccess 1 $
+              withNumTests 1 $
                   conjoin $ map (prop_canDecodeFile (mapM decodeHydraMessage . getSamples)) files
 
 prop_canDecodeFile

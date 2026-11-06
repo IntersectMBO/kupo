@@ -176,7 +176,7 @@ import Test.QuickCheck
     , property
     , scale
     , shrinkList
-    , withMaxSuccess
+    , withNumTests
     , (.&&.)
     )
 import Test.QuickCheck.Monadic
@@ -300,7 +300,7 @@ spec = parallel $ do
                     ]
 
             forAllShrinkShow genConflictingResults shrinkResults showResults $ \results ->
-                withMaxSuccess 50 $ monadicIO $ do
+                withNumTests 50 $ monadicIO $ do
                     (asc, desc) <- withInMemoryDatabase 10 $ \Database{..} -> do
                         let matchAll = MatchAny IncludingBootstrap
 

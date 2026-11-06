@@ -2,11 +2,13 @@
 
 #### Added
 
-N/A
+- Kupo now indexes Dijkstra blocks when it is connected directly to cardano-node. With Ogmios, Kupo stops with an error at the first Dijkstra block, because Ogmios does not serialise Dijkstra transactions yet.
+
+- A Dijkstra transaction that carries sub-transactions is not indexed yet. Kupo stops with an error that names the transaction.
 
 #### Changed
 
-- Bumped internal dependencies to cardano-node==10.5.1
+- Kupo now requires cardano-node 11.1 or later. It talks to the node over node-to-client version 23 only, so older nodes are no longer supported.
 
 - Kupo is now built with GHC 9.12.
 

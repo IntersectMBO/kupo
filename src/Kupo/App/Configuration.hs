@@ -95,7 +95,7 @@ import qualified Network.WebSockets.Tls as WSS
 --
 
 nodeToClientVMin :: NodeToClientVersion
-nodeToClientVMin = NodeToClientV_16
+nodeToClientVMin = NodeToClientV_23
 
 hydrateChainProducer :: ChainProducer () -> IO (ChainProducer (TMVar IO NetworkParameters))
 hydrateChainProducer = \case
