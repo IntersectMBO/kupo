@@ -13,11 +13,21 @@ import Kupo.Data.Cardano
     , ExtendedOutputReference
     , Output
     , emptyMetadata
+    , getPointSlotNo
     , toComparableOutput
+    , unsafeBinaryDataFromBytes
+    )
+import Kupo.Data.PartialBlock
+    ( PartialBlock (..)
+    , PartialTransaction (..)
     )
 import Kupo.Data.Pattern
-    ( Pattern (..)
+    ( Codecs (..)
+    , Match (consumed)
+    , MatchBootstrap (..)
+    , Pattern (..)
     , includes
+    , matchBlock
     , matching
     , overlaps
     , patternFromText
@@ -32,6 +42,11 @@ import Test.Hspec
 import Test.Hspec.QuickCheck
     ( prop
     )
+import Test.Kupo.Data.Generators
+    ( genNonGenesisPoint
+    , genOutputReference
+    , genTransactionId
+    )
 import Test.Kupo.Data.Pattern.Fixture
     ( matches
     , patterns
@@ -41,9 +56,12 @@ import Test.QuickCheck
     , counterexample
     , elements
     , forAll
+    , (===)
     , (==>)
     )
 
+import qualified Data.ByteString as BS
+import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 spec :: Spec
@@ -90,6 +108,36 @@ spec = parallel $ do
             forAll genPattern $ \p2 ->
                 p1 `includes` p2 ==>
                     p1 `overlaps` (Set.singleton p2)
+
+    context "matchBlock" $ do
+        prop "numbers spent inputs and their redeemers in ascending input order" $
+            forAll ((,,,) <$> genNonGenesisPoint <*> genTransactionId <*> genOutputReference <*> genOutputReference) $
+                \(pt, txId, ref1, ref2) -> ref1 /= ref2 ==> do
+                    let (lo, hi) = if ref1 < ref2 then (ref1, ref2) else (ref2, ref1)
+                    let redeemerLo = unsafeBinaryDataFromBytes $ BS.pack [1]
+                    let redeemerHi = unsafeBinaryDataFromBytes $ BS.pack [2]
+                    let tx = PartialTransaction
+                            { id = txId
+                            , inputs = [hi, lo]
+                            , outputs = []
+                            , datums = mempty
+                            , spendRedeemers = Map.fromList [(0, redeemerLo), (1, redeemerHi)]
+                            , scripts = mempty
+                            , metadata = Nothing
+                            }
+                    let blk = PartialBlock { blockPoint = pt, blockBody = [tx], isDijkstraBlock = False }
+                    let codecs = Codecs
+                            { toResult = identity
+                            , toBinaryData = \_ _ -> ()
+                            , toScript = \_ _ -> ()
+                            , toPolicy = \_ _ -> ()
+                            }
+                    let patterns' = Set.singleton (MatchAny IncludingBootstrap)
+                    let got = Map.lookup (txId, getPointSlotNo pt) $ consumed $ matchBlock codecs patterns' blk
+                    got === Just
+                        [ (MatchOutputReference lo, 0, Just redeemerLo)
+                        , (MatchOutputReference hi, 1, Just redeemerHi)
+                        ]
 
 --
 -- Helper
