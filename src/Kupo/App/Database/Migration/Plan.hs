@@ -19,6 +19,7 @@ module Kupo.App.Database.Migration.Plan
       -- * Startup gate
     , MigrationRequiredException (..)
     , migrationRequiredHint
+    , exitCodeMigrationRequired
     , UnknownMigrationsException (..)
     , unknownMigrationsHint
     , describeMigration
@@ -156,6 +157,10 @@ migrationRequiredHint :: Text
 migrationRequiredHint =
     "The database needs migrations that Kupo does not apply on its own. \
     \Run 'kupo db migrate' to apply them, then start Kupo again."
+
+-- | Exit code when the database needs @kupo db migrate@ before Kupo can start.
+exitCodeMigrationRequired :: Int
+exitCodeMigrationRequired = 3
 
 -- | Kupo refuses the database: the listed registry ids are migrations that it does not know.
 newtype UnknownMigrationsException = UnknownMigrationsException [Text]
