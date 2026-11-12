@@ -43,6 +43,7 @@ import Kupo.App.Database.Migration.Plan
     , PlannedAction (..)
     , PlannedStep (..)
     , Registry (..)
+    , UnknownMigrationsException (..)
     , planMigrations
     )
 import Kupo.App.Database.Types
@@ -159,6 +160,11 @@ spec = parallel $ do
                     [ synthetic AutomaticKind "a", synthetic RepairKind "r", synthetic BlockingKind "x" ])
                     `shouldBe` ([], [], [])
 
+            specify "names the ids it does not know" $
+                planUnknown (planMigrations Startup False (registry [("a", Applied), ("v9.9.9/001", Applied)])
+                    [ synthetic AutomaticKind "a", synthetic AutomaticKind "b" ])
+                    `shouldBe` ["v9.9.9/001"]
+
     context "runMigrations" $ do
         specify "an upgrade from user_version 10 backfills the registry" $ withDatabase $ \conn -> do
             runMigrations nullTracer conn (take 10 migrations)
@@ -219,6 +225,16 @@ spec = parallel $ do
             runMigrations nullTracer conn extended
             snapshot conn `shouldReturn` before
 
+        specify "refuses a database that a newer Kupo migrated, without writing" $
+            withDatabase $ \conn -> do
+                runMigrations nullTracer conn migrations
+                addCheckpoint conn
+                addUnknownMigration conn
+                before <- snapshot conn
+                runMigrations nullTracer conn (migrations <> [syntheticTable Automatic "after"])
+                    `shouldThrow` isUnknownMigrations ["v9.9.9/001"]
+                snapshot conn `shouldReturn` before
+
         specify "runs a statement that holds a ';', such as a trigger body" $ withDatabase $ \conn -> do
             let trigger = (synthetic AutomaticKind "test/trigger")
                     { migrationAction = Automatic
@@ -258,6 +274,12 @@ spec = parallel $ do
                 (migrations <> [synthetic RepairKind "test/repair", syntheticTable Blocking "blocking"])
                 `shouldThrow` isMigrationRequiredFor ["test/blocking"]
             snapshot conn `shouldReturn` before
+
+        specify "refuses a database that a newer Kupo migrated" $ withDatabase $ \conn -> do
+            runMigrations nullTracer conn migrations
+            addUnknownMigration conn
+            checkMigrations nullTracer conn migrations
+                `shouldThrow` isUnknownMigrations ["v9.9.9/001"]
 
         specify "carries on, without writing, when the writer has not migrated yet" $
             withDatabase $ \conn -> do
@@ -311,6 +333,10 @@ isMigrationRequiredFor :: [Text] -> Selector MigrationRequiredException
 isMigrationRequiredFor ids (MigrationRequiredException pendingMigrations) =
     (T.takeWhile (/= ' ') <$> pendingMigrations) == ids
 
+isUnknownMigrations :: [Text] -> Selector UnknownMigrationsException
+isUnknownMigrations ids (UnknownMigrationsException unknownMigrations) =
+    unknownMigrations == ids
+
 withDatabase :: (Connection -> IO a) -> IO a
 withDatabase =
     withConnection ":memory:"
@@ -318,6 +344,11 @@ withDatabase =
 addCheckpoint :: Connection -> IO ()
 addCheckpoint conn =
     execute_ conn "INSERT INTO checkpoints (header_hash, slot_no) VALUES (x'00', 42)"
+
+-- As if a newer Kupo had applied a migration this version does not know.
+addUnknownMigration :: Connection -> IO ()
+addUnknownMigration conn =
+    execute_ conn "INSERT INTO migrations (id, state, registered_at) VALUES ('v9.9.9/001', 'applied', 0)"
 
 userVersion :: Connection -> IO [Int]
 userVersion conn =
