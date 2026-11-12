@@ -19,6 +19,8 @@ module Kupo.App.Database.Migration.Plan
       -- * Startup gate
     , MigrationRequiredException (..)
     , migrationRequiredHint
+    , UnknownMigrationsException (..)
+    , unknownMigrationsHint
     , describeMigration
     ) where
 
@@ -56,6 +58,7 @@ planMigrations caller isFresh registry knownMigrations = Plan
         , registryState registry position migration == Just Pending
             || position `elem` newlyPending
         ]
+    , planUnknown = unknownIds registry
     }
   where
     indexed = zip [1 ..] knownMigrations
@@ -80,6 +83,10 @@ planMigrations caller isFresh registry knownMigrations = Plan
     hasNoDataToRepair BatchRepair{repairDataIntroducedBy} =
         repairDataIntroducedBy `elem` newlyApplied
 
+    unknownIds = \case
+        UserVersionOnly{} -> []
+        RegistryRows rows -> filter (`notElem` (migrationId <$> knownMigrations)) $ Map.keys rows
+
 -- | Who runs the migrations.
 data Caller
     = Startup
@@ -96,6 +103,8 @@ data Plan = Plan
     -- ^ The first pending 'Blocking' migration and every unprocessed one after it; none of them runs.
     , planPendingRepairs :: ![Migration]
     -- ^ Repairs that are still pending once the steps have run.
+    , planUnknown :: ![Text]
+    -- ^ Registry ids this version does not know: a newer Kupo migrated the database.
     }
 
 data PlannedStep = PlannedStep
@@ -147,6 +156,18 @@ migrationRequiredHint :: Text
 migrationRequiredHint =
     "The database needs migrations that Kupo does not apply on its own. \
     \Run 'kupo db migrate' to apply them, then start Kupo again."
+
+-- | Kupo refuses the database: the listed registry ids are migrations that it does not know.
+newtype UnknownMigrationsException = UnknownMigrationsException [Text]
+    deriving (Show)
+
+instance Exception UnknownMigrationsException where
+    displayException (UnknownMigrationsException unknownMigrations) =
+        toString . T.unlines $ unknownMigrationsHint : "Unknown migrations:" : fmap ("  " <>) unknownMigrations
+
+unknownMigrationsHint :: Text
+unknownMigrationsHint =
+    "This database was migrated by a newer Kupo. Run that version, or a later one, instead."
 
 -- | One line naming a migration: its id, kind and summary.
 describeMigration

@@ -51,10 +51,12 @@ import Kupo.App.Database.Migration.Plan
     , PlannedAction (..)
     , PlannedStep (..)
     , Registry (..)
+    , UnknownMigrationsException (..)
     , describeMigration
     , migrationRequiredHint
     , migrationStateToText
     , planMigrations
+    , unknownMigrationsHint
     )
 import Kupo.App.Database.SQLite.Transaction
     ( withTransaction
@@ -128,6 +130,7 @@ checkMigrations tr conn knownMigrations = do
         userVersion <- databaseVersion conn
         (userVersion,) <$> readPlan conn Startup userVersion knownMigrations
     traceWith tr (DatabaseCurrentVersion currentVersion)
+    refuseUnknown tr plan
     unless (null planSteps) $
         traceWith tr DatabaseReplicaNotMigrated
             { unappliedMigrations = describeMigration . stepMigration <$> planSteps
@@ -135,12 +138,13 @@ checkMigrations tr conn knownMigrations = do
             }
     enforceGate tr plan
 
--- Run what the plan allows.
+-- Run what the plan allows, once sure that no newer Kupo migrated the database.
 applyMigrations :: Tracer IO TraceDatabase -> Connection -> Caller -> [Migration] -> IO Plan
 applyMigrations tr conn caller knownMigrations = do
     currentVersion <- databaseVersion conn
     traceWith tr (DatabaseCurrentVersion currentVersion)
     plan@Plan{planSteps} <- readPlan conn caller currentVersion knownMigrations
+    refuseUnknown tr plan
     if null planSteps then
         traceWith tr DatabaseNoMigrationNeeded
     else do
@@ -156,6 +160,14 @@ readPlan conn caller currentVersion knownMigrations = do
     isFresh <- isFreshDatabase conn
     registry <- readRegistry conn currentVersion
     pure $ planMigrations caller isFresh registry knownMigrations
+
+-- An older Kupo must not touch what a newer one migrated.
+refuseUnknown :: Tracer IO TraceDatabase -> Plan -> IO ()
+refuseUnknown tr Plan{planUnknown} =
+    unless (null planUnknown) $ do
+        traceWith tr DatabaseMigratedByNewerKupo
+            { unknownMigrations = planUnknown, hint = unknownMigrationsHint }
+        throwIO $ UnknownMigrationsException planUnknown
 
 -- Warn about pending repairs, and refuse to go past a pending 'Blocking' migration.
 enforceGate :: Tracer IO TraceDatabase -> Plan -> IO ()
