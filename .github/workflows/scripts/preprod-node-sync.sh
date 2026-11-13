@@ -79,7 +79,13 @@ while true; do
     continue
   fi
   query_failures=0
-  progress=$(jq -er '.syncProgress | tonumber | select(. >= 0 and . <= 100)' <<< "$tip")
+  # A successful query can omit progress while the node is initializing.
+  # Missing progress is not zero, even when the requested target is zero.
+  if ! progress=$(jq -er '.syncProgress // empty | tonumber | select(. >= 0 and . <= 100)' <<< "$tip"); then
+    echo "Waiting for node to report sync progress..." >&2
+    sleep 5
+    continue
+  fi
   echo "Sync progress: ${progress}%"
   if jq -en --argjson progress "$progress" --argjson level "$SYNC_LEVEL" \
       '$progress >= ($level * 100)' >/dev/null; then

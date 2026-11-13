@@ -86,8 +86,12 @@ elif args[0]=='exec':
     count.write_text(str(n+1))
     if n < int(os.environ.get('QUERY_FAILURES','0')):
         print('fixture query failure',file=sys.stderr);sys.exit(1)
-    progress=json.loads(os.environ.get('PROGRESS','["100.00"]'))
-    print(json.dumps({'syncProgress':progress[min(n,len(progress)-1)]}))
+    if 'TIP_RESPONSES' in os.environ:
+        tips=json.loads(os.environ['TIP_RESPONSES'])
+        print(json.dumps(tips[min(n,len(tips)-1)]))
+    else:
+        progress=json.loads(os.environ.get('PROGRESS','["100.00"]'))
+        print(json.dumps({'syncProgress':progress[min(n,len(progress)-1)]}))
 else: raise AssertionError(args)
 '''
 
@@ -328,6 +332,31 @@ os.execv({real_du!r}, [{real_du!r}, *sys.argv[1:]])
         self.node_socket()
         result = self.run_script('preprod-node-sync.sh', ok=False, args=['1'],
                                  extra={'SYNC_TIMEOUT_SECONDS':'1', 'PROGRESS':'["90"]'})
+        self.assertIn('Timed out waiting for node to sync', result.stderr)
+
+
+    def test_sync_waits_for_missing_progress_even_at_zero_target(self):
+        self.node_socket()
+        tips = [{}] * 15 + [{'syncProgress':'0'}]
+        result = self.run_script('preprod-node-sync.sh', args=['0'],
+                                 extra={'TIP_RESPONSES':json.dumps(tips)})
+        self.assertIn('Waiting for node to report sync progress', result.stderr)
+        self.assertIn('Reached target sync level', result.stdout)
+        self.assertEqual((self.root / 'query-count').read_text(), '16')
+
+    def test_sync_retries_unusable_progress_then_reaches_target(self):
+        self.node_socket()
+        tips = [{'syncProgress':value} for value in [None, 'unknown', -1, 101, '100.00']]
+        result = self.run_script('preprod-node-sync.sh', args=['1'],
+                                 extra={'TIP_RESPONSES':json.dumps(tips)})
+        self.assertIn('Reached target sync level', result.stdout)
+        self.assertEqual((self.root / 'query-count').read_text(), '5')
+
+    def test_missing_progress_respects_sync_deadline(self):
+        self.node_socket()
+        result = self.run_script('preprod-node-sync.sh', ok=False, args=['1'],
+                                 extra={'TIP_RESPONSES':'[{}]', 'SYNC_TIMEOUT_SECONDS':'1'})
+        self.assertIn('Waiting for node to report sync progress', result.stderr)
         self.assertIn('Timed out waiting for node to sync', result.stderr)
 
 
