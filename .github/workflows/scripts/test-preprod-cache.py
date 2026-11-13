@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise preprod cache scripts with a filesystem-backed S3 fixture.
+"""Exercise preprod cache scripts with a filesystem-backed S3 fixture and fake Docker.
 
 Run: python3 .github/workflows/scripts/test-preprod-cache.py
 Requires bash and jq; never contacts AWS or starts a container.
@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,30 @@ elif cmd == 'rm':
 else: raise AssertionError(cmd)
 '''
 
+DOCKER = r'''
+import json, os, sys
+from pathlib import Path
+args=sys.argv[1:]
+with open(os.environ['DOCKER_LOG'],'a') as log: log.write(json.dumps(args)+'\n')
+if args[0]=='run': print('fixture-container')
+elif args[0]=='inspect': print('false' if os.environ.get('NODE_STOPPED') else 'true')
+elif args[0]=='logs': print('fixture node diagnostics',file=sys.stderr)
+elif args[0]=='exec':
+    if args[args.index('--testnet-magic') + 1] != '1':
+        raise AssertionError('Expected Preprod network magic')
+    if args[-2:] != ['--socket-path','/ipc/node.socket']:
+        print('Missing: --socket-path',file=sys.stderr);sys.exit(1)
+    count=Path(os.environ['QUERY_COUNT'])
+    n=int(count.read_text()) if count.exists() else 0
+    count.write_text(str(n+1))
+    if n < int(os.environ.get('QUERY_FAILURES','0')):
+        print('fixture query failure',file=sys.stderr);sys.exit(1)
+    progress=json.loads(os.environ.get('PROGRESS','["100.00"]'))
+    print(json.dumps({'syncProgress':progress[min(n,len(progress)-1)]}))
+else: raise AssertionError(args)
+'''
+
+
 class CacheTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -81,8 +106,11 @@ class CacheTests(unittest.TestCase):
         self.env = os.environ | {
             'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
             'BUCKET': str(self.bucket), 'CALL_LOG': str(self.log),
+            'RUNNER_TEMP': str(self.root), 'CONFDIR': str(self.root / 'config'),
+            'CARDANO_NODE_VERSION': '11.1.3', 'DOCKER_LOG': str(self.root / 'docker-log'),
+            'QUERY_COUNT': str(self.root / 'query-count'),
         }
-        for name, body in [('s5cmd', S5CMD), ('sleep', 'import time; time.sleep(0.01)')]:
+        for name, body in [('s5cmd', S5CMD), ('docker', DOCKER), ('sleep', 'import time; time.sleep(0.01)')]:
             path = self.bin / name
             path.write_text(f'#!{sys.executable}\n' + body)
             path.chmod(0o755)
@@ -237,7 +265,6 @@ os.execv({real_du!r}, [{real_du!r}, *sys.argv[1:]])
         self.run_script('preprod-db-save.sh')
         self.assertTrue((self.cache / 'ledger/900/state').exists())
 
-
     def test_save_preserves_preview_prefix_in_shared_bucket(self):
         self.seed()
         self.local_db()
@@ -249,6 +276,59 @@ os.execv({real_du!r}, [{real_du!r}, *sys.argv[1:]])
         self.run_script('preprod-db-save.sh')
         after = {p.relative_to(preview): p.read_bytes() for p in preview.rglob('*') if p.is_file()}
         self.assertEqual(before, after)
+
+
+    def node_socket(self):
+        (self.root / 'ipc').mkdir()
+        sock=socket.socket(socket.AF_UNIX)
+        sock.bind(str(self.root / 'ipc/node.socket'))
+        self.addCleanup(sock.close)
+
+    def test_sync_passes_explicit_socket_and_reaches_target(self):
+        self.node_socket()
+        result=self.run_script('preprod-node-sync.sh',args=['1'],extra={'PROGRESS':'["97.00","100.00"]'})
+        self.assertIn('Reached target sync level',result.stdout)
+        self.assertEqual((self.root/'query-count').read_text(),'2')
+
+    def test_query_failure_is_visible_and_bounded(self):
+        self.node_socket()
+        result=self.run_script('preprod-node-sync.sh',ok=False,args=['1'],extra={'QUERY_FAILURES':'100'})
+        self.assertIn('fixture query failure',result.stderr)
+        self.assertIn('Twelve consecutive',result.stderr)
+        self.assertEqual((self.root/'query-count').read_text(),'12')
+
+    def test_sync_detects_stopped_node(self):
+        result=self.run_script('preprod-node-sync.sh',ok=False,args=['1'],extra={'NODE_STOPPED':'1'})
+        self.assertIn('stopped before reaching',result.stderr)
+
+    def test_sync_validates_target_and_accepts_zero(self):
+        for target in ['-1','1.1','garbage']:
+            self.run_script('preprod-node-sync.sh',ok=False,args=[target])
+        self.node_socket()
+        self.run_script('preprod-node-sync.sh',args=['0'],extra={'PROGRESS':'["0"]'})
+
+
+    def test_sync_reports_started_node_and_uses_preprod_database(self):
+        self.node_socket()
+        output = self.root / 'outputs'
+        self.run_script('preprod-node-sync.sh', args=['0.9999'],
+                        extra={'GITHUB_OUTPUT':str(output), 'PROGRESS':'["99.99"]'})
+        self.assertEqual(output.read_text(), 'node-started=true\n')
+        calls = [json.loads(line) for line in (self.root / 'docker-log').read_text().splitlines()]
+        self.assertIn(str(self.root / 'db-preprod') + ':/db', calls[0])
+
+    def test_invalid_sync_input_does_not_report_started_node(self):
+        output = self.root / 'outputs'
+        self.run_script('preprod-node-sync.sh', ok=False, args=['"1"'],
+                        extra={'GITHUB_OUTPUT':str(output)})
+        self.assertFalse(output.exists())
+        self.assertFalse((self.root / 'docker-log').exists())
+
+    def test_sync_deadline_is_bounded(self):
+        self.node_socket()
+        result = self.run_script('preprod-node-sync.sh', ok=False, args=['1'],
+                                 extra={'SYNC_TIMEOUT_SECONDS':'1', 'PROGRESS':'["90"]'})
+        self.assertIn('Timed out waiting for node to sync', result.stderr)
 
 
 if __name__ == '__main__':

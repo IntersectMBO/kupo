@@ -6,6 +6,28 @@ Fork pull requests run `nix build --no-link --print-build-logs .#checks.x86_64-l
 
 The fork job conditions route checks; GitHub's restrictions on fork tokens and secrets provide the security boundary. Keep those restrictions enabled in repository settings. Container publication requires a successful Continuous Integration run for the exact tagged commit from a push to `master` or a manual run on `master`; a PR check cannot satisfy it. Actions caching is disabled in these workflows; S3 database snapshots and the Nix binary cache remain available.
 
+### Preprod database cache
+
+Integration tests restore the Preprod database from `s3://$AWS_S3_BUCKET/db-preprod` without uploading it. Ogmios may use the same bucket under `db-preview`; the two prefixes stay separate. Network Synchronization is the sole cache writer, scheduled at 06:17 UTC on odd-numbered days of the month, with manual dispatch also available. Scheduled and manual writers are serialized across refs. This concurrency group only coordinates runs in this repository.
+
+The new workflow must first exist on the default branch for scheduling and manual dispatch to be available. After that, manual runs retain the branch/ref selector: select a reviewed repository revision because the workflow has AWS access and updates the shared Preprod cache. The synchronization input is a fraction from 0 to 1 (1 means 100%); zero is accepted. Integration tests retain their existing 99.99% threshold.
+
+Restore downloads immutable data, the two newest ledger snapshots, and volatile data. After a successful restore and clean node shutdown, the writer uploads retained snapshots before pruning obsolete snapshots and mirrors volatile files so they stop accumulating. Partial synchronization progress can be saved, but a missing clean-shutdown marker or a reduced immutable chunk count prevents publication. The writer allows up to 290 minutes for synchronization, leaving time for shutdown and upload within the job limit.
+
+The first successful writer run prunes legacy ledger accumulation. Legacy volatile data is still downloaded in full until a writer mirrors the node's current files. The shared prefix is not an atomic snapshot: readers can overlap uploads, and restores retry transfer failures. Avoid running older CI revisions that still upload the entire database alongside the new writer. If bucket versioning is enabled, lifecycle rules control storage occupied by noncurrent object versions.
+
+The helpers in `.github/workflows/scripts/` also work outside CI. Restore/save require Bash, jq, s5cmd, and appropriately scoped AWS credentials plus the AWS region, loaded in the environment or an AWS profile before invocation. Restore needs list/read access; save also needs upload/delete access under the selected prefix. Never put credential values in command-line arguments. Use a dedicated local database directory, restore before starting the node, stop the node cleanly before saving, and serialize writers yourself outside GitHub Actions.
+
+```bash
+nix shell nixpkgs#s5cmd -c \
+  ./.github/workflows/scripts/preprod-db-restore.sh "s3://$AWS_S3_BUCKET/db-preprod" /path/to/db-preprod
+# After running and cleanly stopping the node:
+nix shell nixpkgs#s5cmd -c \
+  ./.github/workflows/scripts/preprod-db-save.sh "s3://$AWS_S3_BUCKET/db-preprod" /path/to/db-preprod
+```
+
+Run cache and node-sync regression tests with `python3 .github/workflows/scripts/test-preprod-cache.py` (requires Bash and jq). They use local fixtures and fake S3/Docker commands without accessing AWS or starting containers.
+
 ## End-to-End
 
 Most of the application logic is tested end-to-end in [KupoSpec](./Test/KupoSpec.hs). This set of tests is only executed if the environment variables `CARDANO_NODE_SOCKET` and `CARDANO_NODE_CONFIG` are set and rightfully point to a Cardano testnet node. The node is assumed to by somewhat already synced (at least, up to epoch 192). 

@@ -1,0 +1,99 @@
+---
+name: Network Synchronization
+
+on:
+  schedule:
+  - cron: '17 06 */2 * *'
+  workflow_dispatch:
+    inputs:
+      synchronization-level:
+        description: 'Desired synchronization fraction (0 to 1; 1 = 100%).'
+        required: false
+        default: 1
+        type: number
+
+permissions:
+  contents: read
+
+cache-mode: none
+
+env:
+  CARDANO_NODE_VERSION: "11.1.3"
+  S3_DB_PATH: s3://${{ secrets.AWS_S3_BUCKET }}/db-preprod
+
+jobs:
+  sync_and_cache:
+    # One writer across scheduled/manual runs and all selected refs.
+    concurrency:
+      group: preprod-db-cache-writer
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        persist-credentials: false
+
+    - name: Download cardano-node configs
+      env:
+        BASE_URL: https://raw.githubusercontent.com/input-output-hk/cardano-playground/refs/tags/node-${{ env.CARDANO_NODE_VERSION }}-config/docs/environments/preprod
+      run: |
+        mkdir -p config/preprod
+        cd config/preprod
+        for f in config.json topology.json peer-snapshot.json \
+                 byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json; do
+          curl -sfLO "$BASE_URL/$f"
+        done
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@b97f05dcb019ddea06450a50ef6203d2fdc19fee # v31
+      with:
+        extra_nix_config: |
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+          substituters = https://cache.iog.io/ https://cache.nixos.org/
+
+    - name: Restore cardano-node DB from S3
+      id: restore
+      env:
+        RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        nix shell nixpkgs#s5cmd -c \
+          ./.github/workflows/scripts/preprod-db-restore.sh "$S3_DB_PATH" "$RUNNER_TEMP/db-preprod"
+
+    - name: Sync node
+      id: sync
+      timeout-minutes: 300
+      env:
+        CONFDIR: ${{ github.workspace }}/config/preprod
+        RUNNER_TEMP: ${{ runner.temp }}
+        SYNC_TIMEOUT_SECONDS: "17400"
+        # Stringify without JSON quotes; the nonempty string '0' preserves zero.
+        SYNC_LEVEL: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.synchronization-level) || '1' }}
+      run: |
+        ./.github/workflows/scripts/preprod-node-sync.sh "$SYNC_LEVEL"
+
+    # A node under load takes well over the 10s default to flush and write its
+    # clean-shutdown marker; without it the next start revalidates everything.
+    - name: Stop cardano-node
+      id: stop
+      if: always() && steps.sync.outputs.node-started == 'true'
+      run: |
+        docker stop -t 300 cardano-node
+        docker rm cardano-node
+
+    # Save partial sync progress only after a successful restore and shutdown.
+    # The save script also requires the node's clean-shutdown marker.
+    - name: Save cardano-node DB to S3
+      if: always() && steps.restore.outcome == 'success' && steps.sync.outputs.node-started == 'true' && steps.stop.outcome == 'success'
+      env:
+        RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        nix shell nixpkgs#s5cmd -c \
+          ./.github/workflows/scripts/preprod-db-save.sh "$S3_DB_PATH" "$RUNNER_TEMP/db-preprod"
