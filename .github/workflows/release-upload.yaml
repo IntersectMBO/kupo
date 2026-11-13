@@ -13,11 +13,9 @@ on:
     - '**'
 
 permissions:
-  contents: write
-  actions: read
+  contents: read
 
-env:
-  GH_TOKEN: ${{ github.token }}
+cache-mode: none
 
 jobs:
   # TODO: switch back to this once Hydra reports check-runs to GitHub
@@ -119,6 +117,9 @@ jobs:
         retention-days: 1
 
   upload-assets:
+    permissions:
+      contents: write
+      actions: read
     needs:
     - pull
     name: "Upload Assets"
@@ -132,6 +133,8 @@ jobs:
       run: sha256sum kupo-*.tar.gz > kupo-sha256sums.txt
 
     - name: Release
+      env:
+        GH_TOKEN: ${{ github.token }}
       uses: input-output-hk/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v1
       with:
         draft: true

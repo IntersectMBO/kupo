@@ -1,5 +1,11 @@
 # Testing Strategy
 
+## GitHub Actions checks
+
+Fork pull requests run `nix build --no-link --print-build-logs .#checks.x86_64-linux.kupo-unit` without repository secrets or a live Cardano node. Same-repository pull requests, pushes to `master`, and manual Continuous Integration runs retain the AWS-backed integration tests. Manual runs retain the branch/ref selector; select a trusted repository revision because those runs have AWS access. Repository writers are trusted with that access.
+
+The fork job conditions route checks; GitHub's restrictions on fork tokens and secrets provide the security boundary. Keep those restrictions enabled in repository settings. Container publication requires a successful Continuous Integration run for the exact tagged commit from a push to `master` or a manual run on `master`; a PR check cannot satisfy it. Actions caching is disabled in these workflows; S3 database snapshots and the Nix binary cache remain available.
+
 ## End-to-End
 
 Most of the application logic is tested end-to-end in [KupoSpec](./Test/KupoSpec.hs). This set of tests is only executed if the environment variables `CARDANO_NODE_SOCKET` and `CARDANO_NODE_CONFIG` are set and rightfully point to a Cardano testnet node. The node is assumed to by somewhat already synced (at least, up to epoch 192). 

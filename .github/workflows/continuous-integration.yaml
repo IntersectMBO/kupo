@@ -10,12 +10,37 @@ on:
     branches:
     - master
 
+permissions:
+  contents: read
+
+cache-mode: none
+
 env:
   CARDANO_NODE_VERSION: "11.1.3"
   NETWORK: preprod
-  S3_DB_PATH: s3://${{ secrets.AWS_S3_BUCKET }}/db-preprod
 
 jobs:
+  fork-checks:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        submodules: true
+        persist-credentials: false
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@b97f05dcb019ddea06450a50ef6203d2fdc19fee # v31
+      with:
+        extra_nix_config: |
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+          substituters = https://cache.iog.io/ https://cache.nixos.org/
+          allow-import-from-derivation = true
+
+    - name: Run tests without a live Cardano node
+      run: nix build --no-link --print-build-logs .#checks.x86_64-linux.kupo-unit
+
   # TODO: switch back to this once Hydra reports check-runs to GitHub
   # wait-for-hydra:
   #   runs-on: ubuntu-latest
@@ -36,6 +61,11 @@ jobs:
   #       done
 
   integration-tests:
+    # Repository writers are trusted to run integration tests with AWS access.
+    # This routes fork jobs; GitHub's fork secret/token restrictions enforce isolation.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      S3_DB_PATH: s3://${{ secrets.AWS_S3_BUCKET }}/db-preprod
     # needs:
     # - wait-for-hydra
     runs-on: ubuntu-24.04

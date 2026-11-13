@@ -11,8 +11,10 @@ on:
 
 permissions:
   contents: read
-  checks: read
+  actions: read
   packages: write
+
+cache-mode: none
 
 jobs:
   build-and-push:
@@ -51,14 +53,17 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        check_name="integration-tests"
+        set -euo pipefail
         deadline=$((SECONDS + 3600))
         while true; do
-          conclusions=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA/check-runs?check_name=$check_name" \
-            --jq '[.check_runs[].conclusion // "pending"] | unique | join(",")')
+          # Only this workflow's master push/manual runs can authorize publication.
+          # A successful PR check (including one with the same job name) cannot.
+          conclusions=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/continuous-integration.yaml/runs?head_sha=$TARGET_SHA&branch=master&per_page=100" |
+            jq -r --arg repo "$GITHUB_REPOSITORY" --arg sha "$TARGET_SHA" \
+              '[.workflow_runs[] | select(.head_repository.full_name == $repo and .head_sha == $sha and .head_branch == "master" and (.event == "push" or .event == "workflow_dispatch"))] | sort_by(.id) | last | if . == null then "" else (.conclusion // "pending") end')
           case "$conclusions" in
             success) echo "Continuous Integration passed"; break ;;
-            ""|*pending*) echo "Continuous Integration pending, waiting 30s..." ;;
+            ""|pending) echo "Continuous Integration pending, waiting 30s..." ;;
             *) echo "::error::Continuous Integration concluded with: $conclusions"; exit 1 ;;
           esac
           if [ "$SECONDS" -ge "$deadline" ]; then
@@ -185,12 +190,16 @@ jobs:
     # '<base>-amd64' / '<base>-arm64' images by digest. No new single-arch
     # manifests are created, so nothing is left untagged.
     - name: Compose multi-arch manifests
+      env:
+        IMAGE_BASE: ${{ steps.tags.outputs.kupo-base }}
+        IMAGE_TAGS: ${{ steps.tags.outputs.kupo }}
       run: |
         set -euo pipefail
-        base='${{ steps.tags.outputs.kupo-base }}'
+        base="$IMAGE_BASE"
         repo="${base%:*}"
         amd64=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$base-amd64" | jq -er .digest)
         arm64=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$base-arm64" | jq -er .digest)
-        for tag in ${{ steps.tags.outputs.kupo }}; do
+        read -r -a tags <<< "$IMAGE_TAGS"
+        for tag in "${tags[@]}"; do
           docker buildx imagetools create -t "$tag" "$repo@$amd64" "$repo@$arm64"
         done
