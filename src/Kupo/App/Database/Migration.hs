@@ -97,6 +97,7 @@ import qualified Kupo.App.Database.Migration.V2_0_0_beta_001 as V2_0_0_beta_001
 import qualified Kupo.App.Database.Migration.V2_10_0_001 as V2_10_0_001
 import qualified Kupo.App.Database.Migration.V2_12_0_001 as V2_12_0_001
 import qualified Kupo.App.Database.Migration.V2_12_0_002 as V2_12_0_002
+import qualified Kupo.App.Database.Migration.V2_12_0_003 as V2_12_0_003
 import qualified Kupo.App.Database.Migration.V2_1_0_001 as V2_1_0_001
 import qualified Kupo.App.Database.Migration.V2_1_0_002 as V2_1_0_002
 import qualified Kupo.App.Database.Migration.V2_1_0_003 as V2_1_0_003
@@ -122,6 +123,7 @@ migrations =
     , V2_10_0_001.migration
     , V2_12_0_001.migration
     , V2_12_0_002.migration
+    , V2_12_0_003.migration
     ]
 
 -- | Run, in order, what 'planMigrations' allows. Then throw 'MigrationRequiredException' if a

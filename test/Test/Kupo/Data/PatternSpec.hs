@@ -133,7 +133,7 @@ spec = parallel $ do
                             , toPolicy = \_ _ -> ()
                             }
                     let patterns' = Set.singleton (MatchAny IncludingBootstrap)
-                    let got = Map.lookup (txId, getPointSlotNo pt) $ consumed $ matchBlock codecs patterns' blk
+                    let got = Map.lookup (txId, Nothing, getPointSlotNo pt) $ consumed $ matchBlock codecs patterns' blk
                     got === Just
                         [ (MatchOutputReference lo, 0, Just redeemerLo)
                         , (MatchOutputReference hi, 1, Just redeemerHi)
