@@ -17,6 +17,12 @@ import Kupo.Data.Cardano
     , toComparableOutput
     , unsafeBinaryDataFromBytes
     )
+import Kupo.Data.Http.QuantityEncoding
+    ( QuantityEncoding (..)
+    )
+import Kupo.Data.Http.ReferenceFlag
+    ( ReferenceFlag (..)
+    )
 import Kupo.Data.PartialBlock
     ( PartialBlock (..)
     , PartialTransaction (..)
@@ -26,11 +32,13 @@ import Kupo.Data.Pattern
     , Match (consumed)
     , MatchBootstrap (..)
     , Pattern (..)
+    , Result (..)
     , includes
     , matchBlock
     , matching
     , overlaps
     , patternFromText
+    , resultToJson
     )
 import Test.Hspec
     ( Spec
@@ -42,9 +50,13 @@ import Test.Hspec
 import Test.Hspec.QuickCheck
     ( prop
     )
+import Test.Kupo.App.Http.Client
+    ( decodeResult
+    )
 import Test.Kupo.Data.Generators
     ( genNonGenesisPoint
     , genOutputReference
+    , genResult
     , genTransactionId
     )
 import Test.Kupo.Data.Pattern.Fixture
@@ -56,10 +68,12 @@ import Test.QuickCheck
     , counterexample
     , elements
     , forAll
+    , suchThat
     , (===)
     , (==>)
     )
 
+import qualified Data.Aeson.Encoding as Json
 import qualified Data.ByteString as BS
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -109,6 +123,15 @@ spec = parallel $ do
                 p1 `includes` p2 ==>
                     p1 `overlaps` (Set.singleton p2)
 
+    context "resultToJson" $ do
+        prop "encodes and decodes the sub-transaction fields" $
+            forAll (genResult `suchThat` isSpentConsistently) $ \result -> do
+                let bytes = Json.encodingToLazyByteString (resultToJson InlineAll EncodeAsInteger result)
+                -- The spending parent is only reported for a spent output.
+                let expectedSpender = spentAt result *> spentByTopLevelTransactionId result
+                fmap (\r -> (subTransactionOf r, spentByTopLevelTransactionId r)) (eitherDecodeJson decodeResult bytes)
+                    === Right (subTransactionOf result, expectedSpender)
+
     context "matchBlock" $ do
         prop "numbers spent inputs and their redeemers in ascending input order" $
             forAll ((,,,) <$> genNonGenesisPoint <*> genTransactionId <*> genOutputReference <*> genOutputReference) $
@@ -142,6 +165,11 @@ spec = parallel $ do
 --
 -- Helper
 --
+
+-- The decoder reads the spender of every spent output.
+isSpentConsistently :: Result -> Bool
+isSpentConsistently result =
+    isJust (spentAt result) == isJust (spentBy result)
 
 matchAll
     :: Pattern
