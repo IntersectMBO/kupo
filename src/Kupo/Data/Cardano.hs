@@ -257,6 +257,61 @@ instance IsBlock Block where
             unless (OMap.null (tx ^. Ledger.bodyTxL . Ledger.subTransactionsTxBodyL)) $
                 Left (UnsupportedSubTransactions (Ledger.txIdTx @DijkstraEra tx))
 
+    subTransactions
+        :: Transaction
+        -> [Transaction]
+    subTransactions = \case
+        TransactionByron{} ->
+            []
+        TransactionShelley{} ->
+            []
+        TransactionAllegra{} ->
+            []
+        TransactionMary{} ->
+            []
+        TransactionAlonzo{} ->
+            []
+        TransactionBabbage{} ->
+            []
+        TransactionConway{} ->
+            []
+        TransactionDijkstra tx ->
+            -- A phase-2 invalid transaction applies none of its sub-transactions.
+            case tx ^. Ledger.isPhase2ValidTxL of
+                Ledger.Phase2Valid ->
+                    SubTransactionDijkstra <$> toList (tx ^. Ledger.bodyTxL . Ledger.subTransactionsTxBodyL)
+                Ledger.Phase2Invalid ->
+                    []
+        SubTransactionDijkstra{} ->
+            []
+
+    discardedSubTransactions
+        :: Transaction
+        -> [Transaction]
+    discardedSubTransactions = \case
+        TransactionByron{} ->
+            []
+        TransactionShelley{} ->
+            []
+        TransactionAllegra{} ->
+            []
+        TransactionMary{} ->
+            []
+        TransactionAlonzo{} ->
+            []
+        TransactionBabbage{} ->
+            []
+        TransactionConway{} ->
+            []
+        TransactionDijkstra tx ->
+            case tx ^. Ledger.isPhase2ValidTxL of
+                Ledger.Phase2Valid ->
+                    []
+                Ledger.Phase2Invalid ->
+                    SubTransactionDijkstra <$> toList (tx ^. Ledger.bodyTxL . Ledger.subTransactionsTxBodyL)
+        SubTransactionDijkstra{} ->
+            []
+
     spentInputs
         :: Transaction
         -> Set Input
@@ -293,6 +348,8 @@ instance IsBlock Block where
                     tx ^. Ledger.bodyTxL . Ledger.inputsTxBodyL
                 Ledger.Phase2Invalid ->
                     tx ^. Ledger.bodyTxL . Ledger.collateralInputsTxBodyL
+        SubTransactionDijkstra tx ->
+            tx ^. Ledger.bodyTxL . Ledger.inputsTxBodyL
       where
         transformByron (Ledger.Byron.TxInUtxo txId ix) =
             mkOutputReference
@@ -405,6 +462,14 @@ instance IsBlock Block where
                                 []
                             SJust r  ->
                                 traverseAndTransform identity txId meta start (r :<| mempty)
+        SubTransactionDijkstra tx ->
+            let
+                body = tx ^. Ledger.bodyTxL
+                txId = Ledger.txIdTxBody @DijkstraEra body
+                outs = body ^. Ledger.outputsTxBodyL
+                meta = tx ^. Ledger.auxDataTxL & strictMaybe emptyMetadata identity
+             in
+                traverseAndTransform identity txId meta 0 outs
       where
         traverseAndTransformByron
             :: forall output. ()
@@ -467,6 +532,8 @@ instance IsBlock Block where
             fromConwayData <$> Ledger.unTxDats (tx ^. Ledger.witsTxL . Ledger.datsTxWitsL)
         TransactionDijkstra tx ->
             fromDijkstraData <$> Ledger.unTxDats (tx ^. Ledger.witsTxL . Ledger.datsTxWitsL)
+        SubTransactionDijkstra tx ->
+            fromDijkstraData <$> Ledger.unTxDats (tx ^. Ledger.witsTxL . Ledger.datsTxWitsL)
 
     witnessedScripts
         :: Transaction
@@ -506,6 +573,13 @@ instance IsBlock Block where
               & scriptsFromOutputs
                     (fromConwayOutput <$> tx ^. Ledger.bodyTxL . Ledger.outputsTxBodyL)
         TransactionDijkstra tx ->
+            ( tx ^. Ledger.witsTxL . Ledger.scriptTxWitsL
+            ) & strictMaybe identity
+                    (scriptFromAlonzoAuxiliaryData identity)
+                    (tx ^. Ledger.auxDataTxL)
+              & scriptsFromOutputs
+                    (tx ^. Ledger.bodyTxL . Ledger.outputsTxBodyL)
+        SubTransactionDijkstra tx ->
             ( tx ^. Ledger.witsTxL . Ledger.scriptTxWitsL
             ) & strictMaybe identity
                     (scriptFromAlonzoAuxiliaryData identity)
@@ -567,6 +641,12 @@ instance IsBlock Block where
                     Nothing
                 SJust auxData ->
                     Just (hashMetadata auxData, auxData)
+        SubTransactionDijkstra tx ->
+            case tx ^. Ledger.auxDataTxL of
+                SNothing ->
+                    Nothing
+                SJust auxData ->
+                    Just (hashMetadata auxData, auxData)
 
     spendRedeemer
         :: Transaction
@@ -589,4 +669,6 @@ instance IsBlock Block where
             TransactionConway tx ->
                 Just (RedeemersConway (tx ^. Ledger.witsTxL . Ledger.rdmrsTxWitsL))
             TransactionDijkstra tx ->
+                Just (RedeemersDijkstra (tx ^. Ledger.witsTxL . Ledger.rdmrsTxWitsL))
+            SubTransactionDijkstra tx ->
                 Just (RedeemersDijkstra (tx ^. Ledger.witsTxL . Ledger.rdmrsTxWitsL))
