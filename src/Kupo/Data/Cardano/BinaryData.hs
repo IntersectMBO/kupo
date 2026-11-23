@@ -53,28 +53,27 @@ unsafeBinaryDataFromBytes =
     either (error . toText) identity . Ledger.makeBinaryData . toShort
 {-# INLINABLE unsafeBinaryDataFromBytes #-}
 
+-- | Keeps the decoded bytes; 'coerce' only changes the era label, as the
+-- ledger's translateDatum does.
 fromAlonzoData
-    :: HasCallStack
-    => Ledger.Data AlonzoEra
+    :: Ledger.Data AlonzoEra
     -> BinaryData
 fromAlonzoData =
-    unsafeBinaryDataFromBytes . Ledger.originalBytes
+    coerce . Ledger.dataToBinaryData
 {-# INLINEABLE fromAlonzoData #-}
 
 fromBabbageData
     :: Ledger.Data BabbageEra
     -> BinaryData
 fromBabbageData =
-      Ledger.dataToBinaryData
-    . (Ledger.upgradeData :: Ledger.Data ConwayEra -> Ledger.Data DijkstraEra)
-    . Ledger.upgradeData
+    coerce . Ledger.dataToBinaryData
 {-# INLINEABLE fromBabbageData #-}
 
 fromConwayData
     :: Ledger.Data ConwayEra
     -> BinaryData
 fromConwayData =
-    Ledger.dataToBinaryData . Ledger.upgradeData
+    coerce . Ledger.dataToBinaryData
 {-# INLINEABLE fromConwayData #-}
 
 fromDijkstraData
