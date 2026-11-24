@@ -307,7 +307,7 @@ createShortLivedConnection tr mode (DBLock shortLived longLived) k file = do
 
     !conn <- Sqlite.open' str flags
 
-    forM_ ["PRAGMA cache_size = 1024"] $ \pragma ->
+    forM_ ["PRAGMA cache_size = 1024", "PRAGMA analysis_limit = 1000"] $ \pragma ->
         handle
             (\(_ :: SomeException) -> traceWith trConn ConnectionFailedPragma{pragma})
             (execute_ conn (Query pragma))
@@ -373,6 +373,7 @@ withLongLivedConnection tr (DBLock shortLived longLived) k file deferIndexes act
         execute_ conn "PRAGMA cache_size = 1024"
         execute_ conn "PRAGMA synchronous = NORMAL"
         execute_ conn "PRAGMA journal_mode = WAL"
+        execute_ conn "PRAGMA analysis_limit = 1000"
         execute_ conn "PRAGMA optimize"
         runMigrations tr conn migrations
         installIndexes tr conn deferIndexes
@@ -524,6 +525,7 @@ copyDatabase (tr, progress) fromDir intoDir patterns = do
                         identity
                 traceWith tr DatabaseCopyFinalize
                 execute_ conn "VACUUM"
+                execute_ conn "PRAGMA analysis_limit = 1000"
                 execute_ conn "PRAGMA optimize"
   where
     longestRollback :: LongestRollback
