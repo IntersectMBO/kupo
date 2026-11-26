@@ -92,7 +92,7 @@ archive: kupo-$(TAG)-$(ARCH)-$(OS).tar.gz # Package the application as a tarball
 kupo.sqlite3-$(NETWORK).tar.gz:
 	@echo "Taking snapshot of NETWORK=$(NETWORK)."
 	sqlite3 $(CACHEDIR)/kupo.sqlite3 "VACUUM;"
-	sqlite3 $(CACHEDIR)/kupo.sqlite3 "PRAGMA optimize;"
+	sqlite3 $(CACHEDIR)/kupo.sqlite3 "PRAGMA analysis_limit = 1000; PRAGMA optimize;"
 	GZIP=-9 tar cvzf kupo.sqlite3-$(NETWORK).tar.gz --cd $(CACHEDIR) kupo.sqlite3
 
 snapshot: kupo.sqlite3-$(NETWORK).tar.gz # Take database snapshots. Use NETWORK=XXX to specify target network.
