@@ -205,6 +205,10 @@ specWithConnection (prefix, connectOptions) = do
                     ["--since"      , fromPoint lastByron
                     ,"--in-memory"
                     ]
+                bothMatches =
+                    [ Match 86440 "49ef96" 0 2
+                    , Match 86440 "49ef96" 0 1
+                    ]
             -- Start a kupo since last Byron block and matching on stakeA
             withKupo (options ++ ["--match", stakeA, "--port", "1446"]) $ do
                 -- Wait for indexing at least 100_000 slots
@@ -225,15 +229,14 @@ specWithConnection (prefix, connectOptions) = do
                         [Match 86440 "49ef96" 0 2]
                 -- Add stakeA pattern forcing rollback to last Byron block
                 putNewPattern 1447 stakeA lastByron `shouldReturn` True
-                -- Wait for rollback (checkpoints should go back in time)
-                eventually (hasNotReachedPoint 1447 lastByron136K)
+                -- Wait for both matches, then for the replay to pass the window
+                eventually (hasMatchesInWindow 1447 lastByron lastByron136K bothMatches)
+                eventually (hasReachedPoint 1447 lastByron136K)
                 getPatterns 1447 `shouldReturn` Just [stakeA, stakeB]
                 getMatchesInWindow 1447 lastByron lastByron136K
                     `shouldReturn` Just
                         -- now we have both matches together, proving rollback
-                        [ Match 86440 "49ef96" 0 2
-                        , Match 86440 "49ef96" 0 1
-                        ]
+                        bothMatches
 
     around withDir $ do
 
@@ -395,8 +398,9 @@ hasIndexes port point = do
 hasReachedPoint :: Int -> Point -> IO Bool
 hasReachedPoint port = checkResponse port "/checkpoints" . hasReached
 
-hasNotReachedPoint :: Int -> Point -> IO Bool
-hasNotReachedPoint port = checkResponse port "/checkpoints" . hasNotReached
+hasMatchesInWindow :: Int -> Point -> Point -> [Match] -> IO Bool
+hasMatchesInWindow port from to expected =
+    (== Just expected) <$> getMatchesInWindow port from to
 
 hasCheckpointsAllLaterThan :: Int -> Point -> IO Bool
 hasCheckpointsAllLaterThan port =
@@ -491,9 +495,6 @@ containsCheckpoints = checkpoints (const True)
 
 hasReached :: Point -> ResponseCheck
 hasReached (Point slot _) = checkpoints (maybe False (>= slot) . listToMaybe)
-
-hasNotReached :: Point -> ResponseCheck
-hasNotReached (Point slot _) = checkpoints (maybe False (< slot) . listToMaybe)
 
 laterThan :: Point -> ResponseCheck
 laterThan (Point slot _) = checkpoints (all (>= slot))
