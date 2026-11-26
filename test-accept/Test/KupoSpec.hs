@@ -70,6 +70,7 @@ import Network.HTTP.Types.Status
 import System.Directory
     ( Permissions (..)
     , getPermissions
+    , listDirectory
     , removePathForcibly
     , setPermissions
     )
@@ -250,7 +251,9 @@ specWithConnection (prefix, connectOptions) = do
                     ,"--match"  , "*/*"
                     ,"--workdir", dir
                     ] $ eventually (hasReachedPoint 1448 pointC)
-                -- Change permissions on database's directory
+                -- Change permissions on the database's files and directory
+                files <- listDirectory dir
+                mapM_ (makeUnwritable . ((dir <> "/") <>)) files
                 makeUnwritable dir
                 -- Start a read-only kupo on dir and check that it's also ready
                 withKupoUnconnected
