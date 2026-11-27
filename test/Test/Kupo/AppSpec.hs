@@ -742,7 +742,7 @@ genContinuingBlock utxo txs previousTip = do
     blockPoint <- BlockPoint (next (getPointSlotNo previousTip)) <$> genHeaderHash
     (txs', utxo') <- runStateT (genTransactionSublist txs) utxo
     blockBody <- (txs' <>) <$> evalStateT genPartialTransactions utxo'
-    pure PartialBlock { blockPoint, blockBody, isDijkstraBlock = False }
+    pure PartialBlock { blockPoint, blockBody, hasTransactionStubs = False }
 
 -- | Generate a list of transactions using and modifying a given utxo. The
 -- generation stops when there's no more utxos or, arbitrarily (1 chance out of
@@ -778,7 +778,17 @@ genPartialTransaction = do
         replicateM nScripts (lift genScript)
         & fmap (foldMap (\v -> Map.singleton (hashScript v) v))
     metadata <- lift $ oneof [pure Nothing, Just <$> genMetadata]
-    pure PartialTransaction { id, inputs, outputs, datums, spendRedeemers, scripts, metadata }
+    pure PartialTransaction
+        { id
+        , inputs
+        , outputs
+        , datums
+        , spendRedeemers
+        , scripts
+        , metadata
+        , appliedSubTransactions = []
+        , unappliedSubTransactions = []
+        }
   where
     maxNumberOfInputs = 3
     maxNumberOfOutputs = 3

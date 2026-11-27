@@ -150,8 +150,10 @@ spec = parallel $ do
                             , spendRedeemers = Map.fromList [(ix, redeemer ix) | (ix, _) <- ascending]
                             , scripts = mempty
                             , metadata = Nothing
+                            , appliedSubTransactions = []
+                            , unappliedSubTransactions = []
                             }
-                    let blk = PartialBlock { blockPoint = pt, blockBody = [tx], isDijkstraBlock = False }
+                    let blk = PartialBlock { blockPoint = pt, blockBody = [tx], hasTransactionStubs = False }
                     let codecs = Codecs
                             { toResult = identity
                             , toBinaryData = \_ _ -> ()

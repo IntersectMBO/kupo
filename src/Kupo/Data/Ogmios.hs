@@ -199,19 +199,26 @@ decodeBlock = Json.withObject "Block" $ \o -> do
     slot <- o .:? "slot" >>= \case
         Just slot -> pure slot
         Nothing -> o .: "height"
-    isDijkstraBlock <- (== Just ("dijkstra" :: Text)) <$> o .:? "era"
-    -- Ogmios serialises Dijkstra transactions as stubs, which do not decode.
-    txs <- if isDijkstraBlock then pure [] else o .:? "transactions" .!= []
-    blockBody <- traverse decodePartialTransaction txs
-    pure PartialBlock { blockPoint = BlockPoint (SlotNo slot) id, blockBody, isDijkstraBlock }
+    era <- o .:? "era"
+    txs <- o .:? "transactions" .!= []
+    -- Older Ogmios versions send each Dijkstra transaction with only its id and 'spends'.
+    let hasTransactionStubs = era == Just ("dijkstra" :: Text) && any (not . KeyMap.member "inputs") txs
+    blockBody <- if hasTransactionStubs then pure [] else traverse (decodePartialTransaction . Json.Object) txs
+    pure PartialBlock { blockPoint = BlockPoint (SlotNo slot) id, blockBody, hasTransactionStubs }
 
 decodePartialTransaction
     :: Json.Value
     -> Json.Parser PartialTransaction
 decodePartialTransaction = Json.withObject "PartialTransaction" $ \o -> do
-    id <- o .: "id" >>= decodeTransactionId
-
     inputSource <- o .: "spends"
+    decodeTransaction inputSource o
+
+decodeTransaction
+    :: Json.Key
+    -> Json.Object
+    -> Json.Parser PartialTransaction
+decodeTransaction inputSource o = do
+    id <- o .: "id" >>= decodeTransactionId
 
     inputs <- o .:? inputSource .!= [] >>= traverse decodeInput
 
@@ -228,14 +235,16 @@ decodePartialTransaction = Json.withObject "PartialTransaction" $ \o -> do
 
     scripts <- o .:? "scripts" .!= Json.Object mempty >>= decodeScripts
 
-    outputs <- case Key.toText inputSource of
+    subTransactions <- o .:? "subTransactions" .!= [] >>= traverse decodeSubTransaction
+
+    (outputs, appliedSubTransactions, unappliedSubTransactions) <- case Key.toText inputSource of
         "collaterals" -> do
             outs <- o .:? "outputs" .!= ([] :: [Json.Value])
             colReturn <- o .:? "collateralReturn" >>= traverse decodeOutput
-            pure $ withReferences (fromIntegral $ length outs) id (maybeToList colReturn)
+            pure (withReferences (fromIntegral $ length outs) id (maybeToList colReturn), [], subTransactions)
         "inputs" -> do
             outs <- o .:? "outputs" .!= [] >>= traverse decodeOutput
-            pure $ withReferences 0 id outs
+            pure (withReferences 0 id outs, subTransactions, [])
         (_ :: Text) -> do
             fail "unrecognized input source"
 
@@ -247,7 +256,17 @@ decodePartialTransaction = Json.withObject "PartialTransaction" $ \o -> do
         , spendRedeemers
         , scripts
         , metadata
+        , appliedSubTransactions
+        , unappliedSubTransactions
         }
+
+-- | A sub-transaction has no 'spends': the validity of its top-level transaction decides
+-- whether the ledger applies it.
+decodeSubTransaction
+    :: Json.Value
+    -> Json.Parser PartialTransaction
+decodeSubTransaction =
+    Json.withObject "SubTransaction" (decodeTransaction "inputs")
 
 decodeAddress
     :: Text

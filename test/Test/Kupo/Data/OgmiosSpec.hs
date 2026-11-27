@@ -78,7 +78,7 @@ spec = parallel $ context "can decode relevant Ogmios' test vectors" $ do
         propVector ((dir </>) <$> vectors) decodeNextBlockResponse
 
     context "checkSubTransactions" $ do
-        it "rejects a Dijkstra block, whose transactions Ogmios does not serialise" $ do
+        it "rejects a Dijkstra block whose transactions Ogmios sends without their bodies" $ do
             let stub = Json.object
                     [ "id" .= txId
                     , "spends" .= ("inputs" :: Text)

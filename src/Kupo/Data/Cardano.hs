@@ -173,15 +173,15 @@ class HasTransactionId (BlockBody block) => IsBlock (block :: Type) where
 -- | Raised on a Dijkstra block whose sub-transactions Kupo cannot index.
 data UnsupportedSubTransactions
     = UnverifiableSubTransactions !Point
-    -- ^ A Dijkstra block whose transactions Kupo cannot inspect.
+    -- ^ A Dijkstra block whose transactions Ogmios sent without their bodies.
     deriving (Show)
 
 instance Exception UnsupportedSubTransactions where
     displayException = \case
         UnverifiableSubTransactions point ->
-            "Ogmios does not serialise Dijkstra transactions yet, so Kupo cannot index the block at slot "
+            "This Ogmios does not serialise Dijkstra transactions in full, so Kupo cannot index the block at slot "
                 <> toString (slotNoToText (getPointSlotNo point))
-                <> ". Connect Kupo directly to cardano-node to index Dijkstra blocks."
+                <> ". Upgrade Ogmios, or connect Kupo directly to cardano-node."
 
 instance IsBlock Void where
     type BlockBody Void = Void
