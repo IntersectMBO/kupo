@@ -547,8 +547,10 @@ newStubbedApplication defaultPatterns = do
                             , datums = mempty
                             , spendRedeemers = mempty
                             , metadata
+                            , appliedSubTransactions = []
+                            , unappliedSubTransactions = []
                             }
-                    pure $ PartialBlock { blockPoint, blockBody, isDijkstraBlock = False }
+                    pure $ PartialBlock { blockPoint, blockBody, hasTransactionStubs = False }
         )
         patternsVar
         healthStub

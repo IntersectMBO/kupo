@@ -70,6 +70,7 @@ import Kupo.Data.Cardano
     , pattern GenesisTip
     , pattern RequireAllOf
     , pattern RequireAnyOf
+    , pattern RequireGuard
     , pattern RequireMOf
     , pattern RequireSignature
     , pattern RequireTimeExpire
@@ -97,6 +98,8 @@ import Ouroboros.Consensus.HardFork.Combinator
     ( OneEraHash (..)
     )
 
+import qualified Cardano.Ledger.Credential as Ledger
+import qualified Cardano.Ledger.Hashes as Ledger
 import qualified Cardano.Ledger.Shelley.TxAuxData as Ledger
 import qualified Data.Aeson.Encoding as Json
 import qualified Data.Aeson.Key as Key
@@ -122,6 +125,7 @@ data ScriptPurpose
     | Withdraw
     | Vote
     | Propose
+    | Guard
     deriving (Eq)
 
 -- Encoders
@@ -199,19 +203,26 @@ decodeBlock = Json.withObject "Block" $ \o -> do
     slot <- o .:? "slot" >>= \case
         Just slot -> pure slot
         Nothing -> o .: "height"
-    isDijkstraBlock <- (== Just ("dijkstra" :: Text)) <$> o .:? "era"
-    -- Ogmios serialises Dijkstra transactions as stubs, which do not decode.
-    txs <- if isDijkstraBlock then pure [] else o .:? "transactions" .!= []
-    blockBody <- traverse decodePartialTransaction txs
-    pure PartialBlock { blockPoint = BlockPoint (SlotNo slot) id, blockBody, isDijkstraBlock }
+    era <- o .:? "era"
+    txs <- o .:? "transactions" .!= []
+    -- Older Ogmios versions send each Dijkstra transaction with only its id and 'spends'.
+    let hasTransactionStubs = era == Just ("dijkstra" :: Text) && any (not . KeyMap.member "inputs") txs
+    blockBody <- if hasTransactionStubs then pure [] else traverse (decodePartialTransaction . Json.Object) txs
+    pure PartialBlock { blockPoint = BlockPoint (SlotNo slot) id, blockBody, hasTransactionStubs }
 
 decodePartialTransaction
     :: Json.Value
     -> Json.Parser PartialTransaction
 decodePartialTransaction = Json.withObject "PartialTransaction" $ \o -> do
-    id <- o .: "id" >>= decodeTransactionId
-
     inputSource <- o .: "spends"
+    decodeTransaction inputSource o
+
+decodeTransaction
+    :: Json.Key
+    -> Json.Object
+    -> Json.Parser PartialTransaction
+decodeTransaction inputSource o = do
+    id <- o .: "id" >>= decodeTransactionId
 
     inputs <- o .:? inputSource .!= [] >>= traverse decodeInput
 
@@ -228,14 +239,16 @@ decodePartialTransaction = Json.withObject "PartialTransaction" $ \o -> do
 
     scripts <- o .:? "scripts" .!= Json.Object mempty >>= decodeScripts
 
-    outputs <- case Key.toText inputSource of
+    subTransactions <- o .:? "subTransactions" .!= [] >>= traverse decodeSubTransaction
+
+    (outputs, appliedSubTransactions, unappliedSubTransactions) <- case Key.toText inputSource of
         "collaterals" -> do
             outs <- o .:? "outputs" .!= ([] :: [Json.Value])
             colReturn <- o .:? "collateralReturn" >>= traverse decodeOutput
-            pure $ withReferences (fromIntegral $ length outs) id (maybeToList colReturn)
+            pure (withReferences (fromIntegral $ length outs) id (maybeToList colReturn), [], subTransactions)
         "inputs" -> do
             outs <- o .:? "outputs" .!= [] >>= traverse decodeOutput
-            pure $ withReferences 0 id outs
+            pure (withReferences 0 id outs, subTransactions, [])
         (_ :: Text) -> do
             fail "unrecognized input source"
 
@@ -247,7 +260,17 @@ decodePartialTransaction = Json.withObject "PartialTransaction" $ \o -> do
         , spendRedeemers
         , scripts
         , metadata
+        , appliedSubTransactions
+        , unappliedSubTransactions
         }
+
+-- | A sub-transaction has no 'spends': the validity of its top-level transaction decides
+-- whether the ledger applies it.
+decodeSubTransaction
+    :: Json.Value
+    -> Json.Parser PartialTransaction
+decodeSubTransaction =
+    Json.withObject "SubTransaction" (decodeTransaction "inputs")
 
 decodeAddress
     :: Text
@@ -324,17 +347,18 @@ decodeScript
     -> Json.Parser Script
 decodeScript = Json.withObject "Script" $ \o -> do
     o .: "language" >>= \case
-        "native" -> decodeNative =<< o .: "json"
-        "plutus:v1" -> decodePlutus "01" =<< o .: "cbor"
-        "plutus:v2" -> decodePlutus "02" =<< o .: "cbor"
-        "plutus:v3" -> decodePlutus "03" =<< o .: "cbor"
-        "plutus:v4" -> decodePlutus "04" =<< o .: "cbor"
+        -- Ogmios includes the CBOR of native scripts only when run with --include-script-cbor.
+        "native" -> (decodeTagged "00" =<< o .: "cbor") <|> (decodeNative =<< o .: "json")
+        "plutus:v1" -> decodeTagged "01" =<< o .: "cbor"
+        "plutus:v2" -> decodeTagged "02" =<< o .: "cbor"
+        "plutus:v3" -> decodeTagged "03" =<< o .: "cbor"
+        "plutus:v4" -> decodeTagged "04" =<< o .: "cbor"
         (_ :: Text) -> fail "unrecognized script language"
   where
     decodeNative =
         fmap fromNativeScript . decodeNativeScript
 
-    decodePlutus tag bytes = do
+    decodeTagged tag bytes = do
         case scriptFromBytes <$> decodeBase16 (encodeUtf8 @Text (tag <> bytes)) of
             Right (Just s) ->
                 pure s
@@ -365,6 +389,13 @@ decodeNativeScript o = do
             RequireTimeExpire . SlotNo <$> (o .: "slot")
         "after" -> do
             RequireTimeStart . SlotNo <$> (o .: "slot")
+        -- Older Ogmios versions give a bare hash, with no 'origin' to tell a key from a script.
+        "guard" -> do
+            let credential = o .: "origin" >>= \case
+                    "verificationKey" -> Ledger.KeyHashObj . KeyHash <$> (o .: "from" >>= decodeHash)
+                    "script" -> Ledger.ScriptHashObj . Ledger.ScriptHash <$> (o .: "from" >>= decodeHash)
+                    (_ :: Text) -> fail "unrecognized guard origin"
+            RequireGuard <$> (credential <|> fail "cannot decode a native script guard clause without its CBOR or a known origin: upgrade Ogmios, or run it with --include-script-cbor")
         (_ :: Text) ->
             fail "unrecognized native script clause"
 
@@ -413,6 +444,7 @@ decodeScriptPurpose = \case
     "withdraw" -> pure Withdraw
     "vote" -> pure Vote
     "propose" -> pure Propose
+    "guard" -> pure Guard
     purpose -> fail $ "unknown script purpose: " ++ toString purpose
 
 decodeDatumHash

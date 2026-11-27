@@ -8,6 +8,7 @@ module Kupo.Data.Cardano.NativeScript
     , pattern Ledger.Shelley.RequireMOf
     , pattern Ledger.Allegra.RequireTimeExpire
     , pattern Ledger.Allegra.RequireTimeStart
+    , pattern Ledger.Dijkstra.RequireGuard
     , KeyHash(..)
     ) where
 

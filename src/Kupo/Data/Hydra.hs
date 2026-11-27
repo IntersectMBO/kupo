@@ -121,7 +121,7 @@ mkHydraBlock number txs = do
         , PartialBlock
             { blockPoint = BlockPoint slotNo headerHash
             , blockBody  = toList txs
-            , isDijkstraBlock = False
+            , hasTransactionStubs = False
             }
         )
 
@@ -179,6 +179,8 @@ decodeGenesisTxForUTxO id indexOutputs = do
         , datums = mempty
         , scripts = mempty
         , metadata = Nothing
+        , appliedSubTransactions = []
+        , unappliedSubTransactions = []
         }
 
 decodePartialTransaction :: Json.Value -> Json.Parser PartialTransaction
@@ -225,6 +227,8 @@ decodePartialTransaction = Json.withObject "PartialTransaction" $ \o -> do
                 (unRedeemers $ wits' ^. rdmrsTxWitsL)
         , scripts = Map.map fromConwayScript (wits' ^. scriptTxWitsL)
         , metadata = Nothing
+        , appliedSubTransactions = []
+        , unappliedSubTransactions = []
         }
 
 decodeInput

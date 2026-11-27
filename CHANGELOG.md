@@ -2,9 +2,9 @@
 
 #### Added
 
-- Kupo now indexes Dijkstra blocks when it is connected directly to cardano-node. With Ogmios, Kupo stops with an error at the first Dijkstra block, because Ogmios does not serialise Dijkstra transactions yet.
+- Kupo now indexes Dijkstra blocks, both when it is connected directly to cardano-node and through Ogmios. Through Ogmios, it needs an Ogmios that serialises Dijkstra transactions in full (https://github.com/IntersectMBO/ogmios/pull/22 and https://github.com/IntersectMBO/ogmios/pull/24); with an older Ogmios, Kupo stops with an error at the first Dijkstra block that holds transactions. Through Ogmios, Kupo also stops at a native script with a guard clause when Ogmios does not say whether the guard is a key or a script: Kupo reads that from the clause's `origin` field, or from the script's CBOR when Ogmios runs with `--include-script-cbor`.
 
-- Kupo now indexes Dijkstra sub-transactions when it is connected directly to cardano-node, instead of stopping at the first transaction that carries them. Kupo records the outputs that each sub-transaction creates and the inputs that it spends under the sub-transaction's own id, with the index of its top-level transaction in the block. A `*@<transaction id>` pattern matches the outputs of that transaction only, so the id of a top-level transaction does not match the outputs of its sub-transactions. When a top-level transaction fails phase-2 validation, its sub-transactions create and spend nothing.
+- Kupo now indexes Dijkstra sub-transactions, instead of stopping at the first transaction that carries them. Kupo records the outputs that each sub-transaction creates and the inputs that it spends under the sub-transaction's own id, with the index of its top-level transaction in the block. A `*@<transaction id>` pattern matches the outputs of that transaction only, so the id of a top-level transaction does not match the outputs of its sub-transactions. When a top-level transaction fails phase-2 validation, its sub-transactions create and spend nothing.
 
 - Each match returned by `/matches` now carries `sub_transaction_index` and `top_level_transaction_id`. For an output created by a Dijkstra sub-transaction, they give the position of the sub-transaction among those of its top-level transaction, starting at 0, and the id of that top-level transaction; `transaction_id` stays the id of the sub-transaction itself. Both are `null` for an output of a top-level transaction. The `spent_at` object of a match gains `top_level_transaction_id`: the id of the top-level transaction when a sub-transaction spent the output, `null` otherwise. Existing fields keep their meaning, and `transaction_index` is still the position of the top-level transaction in the block.
 
@@ -34,6 +34,8 @@
 - At startup, Kupo adds three empty columns to the `inputs` table of an existing database, to prepare the indexing of Dijkstra sub-transactions. The change is automatic and instant, and needs no action.
 
 - Kupo now returns datums and redeemers from Babbage and Conway transaction witnesses with their on-chain bytes, as it already does for inline datums and other eras. Earlier versions returned a re-encoding of the same value, which cannot be used as-is to spend an output locked by that datum's hash. Databases built by earlier versions keep the re-encoded bytes.
+
+- Through an Ogmios that runs with `--include-script-cbor`, Kupo now stores native scripts with their on-chain bytes instead of a re-encoding of their JSON.
 
 - Kupo now limits the statistics scan of SQLite's `PRAGMA optimize`, which it runs at start-up, after `kupo copy` and on every garbage collection pass. On large databases the unbounded scan could take hours and stall chain sync. See https://github.com/CardanoSolutions/kupo/issues/209.
 

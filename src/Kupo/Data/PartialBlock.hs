@@ -36,11 +36,10 @@ import qualified Data.Set as Set
 data PartialBlock = PartialBlock
     { blockPoint :: !Point
     , blockBody :: ![PartialTransaction]
-    -- ^ The decoded transactions, empty for a Dijkstra block.
-    , isDijkstraBlock :: !Bool
-    -- ^ Whether this is a Dijkstra block whose transactions were not decoded.
-    --   Ogmios sends Dijkstra transactions without their bodies, and Hydra
-    --   decodes Conway transactions only.
+    -- ^ The decoded transactions, empty when 'hasTransactionStubs'.
+    , hasTransactionStubs :: !Bool
+    -- ^ Whether Ogmios sent the Dijkstra transactions of this block without
+    --   their bodies, as Ogmios versions before full Dijkstra support do.
     } deriving (Eq, Show)
 
 -- | A partial transaction, analogous to 'PartialBlock', trimmed down to the
@@ -53,6 +52,10 @@ data PartialTransaction = PartialTransaction
     , spendRedeemers :: !(Map InputIndex BinaryData)
     , scripts :: !(Map ScriptHash Script)
     , metadata :: !(Maybe (MetadataHash, Metadata))
+    , appliedSubTransactions :: ![PartialTransaction]
+    -- ^ The Dijkstra sub-transactions of a phase-2 valid transaction, in the order the ledger applies them.
+    , unappliedSubTransactions :: ![PartialTransaction]
+    -- ^ The Dijkstra sub-transactions of a phase-2 invalid transaction, which the ledger discards.
     } deriving (Eq, Show)
 
 instance HasTransactionId PartialTransaction where
@@ -70,9 +73,15 @@ instance IsBlock PartialBlock where
     foldBlock fn result =
         foldrWithIndex fn result . blockBody
 
-    checkSubTransactions PartialBlock{blockPoint, isDijkstraBlock} =
-        when isDijkstraBlock $
+    checkSubTransactions PartialBlock{blockPoint, hasTransactionStubs} =
+        when hasTransactionStubs $
             Left (UnverifiableSubTransactions blockPoint)
+
+    subTransactions =
+        appliedSubTransactions
+
+    discardedSubTransactions =
+        unappliedSubTransactions
 
     mapMaybeOutputs fn tx =
         let meta = maybe emptyMetadata snd (metadata tx)
