@@ -115,6 +115,30 @@ spec = parallel $ context "can decode relevant Ogmios' test vectors" $ do
             withBlock (nextBlock "dijkstra" [tx]) $ \blk ->
                 witnessedScriptHashes blk `shouldBe` [(scriptGuardHash, scriptGuardHash)]
 
+        it "decodes a key guard from its JSON origin" $ do
+            let tx = transactionWithScript keyGuardHash $ Json.object
+                    [ "language" .= ("native" :: Text)
+                    , "json" .= guardClause ["origin" .= ("verificationKey" :: Text)]
+                    ]
+            withBlock (nextBlock "dijkstra" [tx]) $ \blk ->
+                witnessedScriptHashes blk `shouldBe` [(keyGuardHash, keyGuardHash)]
+
+        it "decodes a script guard from its JSON origin" $ do
+            let tx = transactionWithScript scriptGuardHash $ Json.object
+                    [ "language" .= ("native" :: Text)
+                    , "json" .= guardClause ["origin" .= ("script" :: Text)]
+                    ]
+            withBlock (nextBlock "dijkstra" [tx]) $ \blk ->
+                witnessedScriptHashes blk `shouldBe` [(scriptGuardHash, scriptGuardHash)]
+
+        it "refuses them without their CBOR or origin" $ do
+            let tx = transactionWithScript scriptGuardHash $ Json.object
+                    [ "language" .= ("native" :: Text)
+                    , "json" .= guardClause []
+                    ]
+            void (Json.parseEither decodeNextBlockResponse (nextBlock "dijkstra" [tx]))
+                `shouldSatisfy` isLeft
+
 --
 -- Helpers
 --
@@ -207,3 +231,8 @@ scriptGuardCbor =
 scriptGuardHash :: Text
 scriptGuardHash =
     "b9114d0c8fcf4610e179afba560689b160b29a062643772105feb6e7"
+
+-- | The hash of the guard clause on the key hash 11...11.
+keyGuardHash :: Text
+keyGuardHash =
+    "7c11fec0e82c325085e055b9d3e829f12d1bcb41c3e2dd6dec8e8f54"

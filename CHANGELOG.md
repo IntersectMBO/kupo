@@ -2,7 +2,7 @@
 
 #### Added
 
-- Kupo now indexes Dijkstra blocks when it is connected directly to cardano-node. With Ogmios, Kupo stops with an error at the first Dijkstra block, because Ogmios does not serialise Dijkstra transactions yet.
+- Kupo now indexes Dijkstra blocks, both when it is connected directly to cardano-node and through Ogmios. Through Ogmios, it needs an Ogmios that serialises Dijkstra transactions in full (https://github.com/IntersectMBO/ogmios/pull/22 and https://github.com/IntersectMBO/ogmios/pull/24); with an older Ogmios, Kupo stops with an error at the first Dijkstra block that holds transactions. Through Ogmios, Kupo also stops at a native script with a guard clause when Ogmios does not say whether the guard is a key or a script: Kupo reads that from the clause's `origin` field, or from the script's CBOR when Ogmios runs with `--include-script-cbor`.
 
 - Kupo now indexes Dijkstra sub-transactions, instead of stopping at the first transaction that carries them. Kupo records the outputs that each sub-transaction creates and the inputs that it spends under the sub-transaction's own id, with the index of its top-level transaction in the block. A `*@<transaction id>` pattern matches the outputs of that transaction only, so the id of a top-level transaction does not match the outputs of its sub-transactions. When a top-level transaction fails phase-2 validation, its sub-transactions create and spend nothing.
 

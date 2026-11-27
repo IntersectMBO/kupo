@@ -70,6 +70,7 @@ import Kupo.Data.Cardano
     , pattern GenesisTip
     , pattern RequireAllOf
     , pattern RequireAnyOf
+    , pattern RequireGuard
     , pattern RequireMOf
     , pattern RequireSignature
     , pattern RequireTimeExpire
@@ -97,6 +98,8 @@ import Ouroboros.Consensus.HardFork.Combinator
     ( OneEraHash (..)
     )
 
+import qualified Cardano.Ledger.Credential as Ledger
+import qualified Cardano.Ledger.Hashes as Ledger
 import qualified Cardano.Ledger.Shelley.TxAuxData as Ledger
 import qualified Data.Aeson.Encoding as Json
 import qualified Data.Aeson.Key as Key
@@ -386,6 +389,13 @@ decodeNativeScript o = do
             RequireTimeExpire . SlotNo <$> (o .: "slot")
         "after" -> do
             RequireTimeStart . SlotNo <$> (o .: "slot")
+        -- Older Ogmios versions give a bare hash, with no 'origin' to tell a key from a script.
+        "guard" -> do
+            let credential = o .: "origin" >>= \case
+                    "verificationKey" -> Ledger.KeyHashObj . KeyHash <$> (o .: "from" >>= decodeHash)
+                    "script" -> Ledger.ScriptHashObj . Ledger.ScriptHash <$> (o .: "from" >>= decodeHash)
+                    (_ :: Text) -> fail "unrecognized guard origin"
+            RequireGuard <$> (credential <|> fail "cannot decode a native script guard clause without its CBOR or a known origin: upgrade Ogmios, or run it with --include-script-cbor")
         (_ :: Text) ->
             fail "unrecognized native script clause"
 
