@@ -122,6 +122,7 @@ data ScriptPurpose
     | Withdraw
     | Vote
     | Propose
+    | Guard
     deriving (Eq)
 
 -- Encoders
@@ -432,6 +433,7 @@ decodeScriptPurpose = \case
     "withdraw" -> pure Withdraw
     "vote" -> pure Vote
     "propose" -> pure Propose
+    "guard" -> pure Guard
     purpose -> fail $ "unknown script purpose: " ++ toString purpose
 
 decodeDatumHash
