@@ -1,9 +1,11 @@
 [submodule "config"]
 	path = config
 	url = https://github.com/input-output-hk/cardano-configurations.git
+# TODO: pinned to the head of https://github.com/IntersectMBO/ogmios/pull/45 (guard clause origin);
+# move it to the merge commit on master once the PR merges.
 [submodule "test/ogmios"]
 	path = test/vectors/ogmios
-	url = https://github.com/cardanosolutions/ogmios.git
+	url = https://github.com/IntersectMBO/ogmios.git
 [submodule "test/vectors/hydra"]
 	path = test/vectors/hydra
 	url = https://github.com/input-output-hk/hydra.git
