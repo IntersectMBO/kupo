@@ -35,6 +35,8 @@
 
 - Kupo now returns datums and redeemers from Babbage and Conway transaction witnesses with their on-chain bytes, as it already does for inline datums and other eras. Earlier versions returned a re-encoding of the same value, which cannot be used as-is to spend an output locked by that datum's hash. Databases built by earlier versions keep the re-encoded bytes.
 
+- Through an Ogmios that runs with `--include-script-cbor`, Kupo now stores native scripts with their on-chain bytes instead of a re-encoding of their JSON.
+
 - Kupo now limits the statistics scan of SQLite's `PRAGMA optimize`, which it runs at start-up, after `kupo copy` and on every garbage collection pass. On large databases the unbounded scan could take hours and stall chain sync. See https://github.com/CardanoSolutions/kupo/issues/209.
 
 #### Removed

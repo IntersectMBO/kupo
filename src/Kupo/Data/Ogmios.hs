@@ -344,17 +344,18 @@ decodeScript
     -> Json.Parser Script
 decodeScript = Json.withObject "Script" $ \o -> do
     o .: "language" >>= \case
-        "native" -> decodeNative =<< o .: "json"
-        "plutus:v1" -> decodePlutus "01" =<< o .: "cbor"
-        "plutus:v2" -> decodePlutus "02" =<< o .: "cbor"
-        "plutus:v3" -> decodePlutus "03" =<< o .: "cbor"
-        "plutus:v4" -> decodePlutus "04" =<< o .: "cbor"
+        -- Ogmios includes the CBOR of native scripts only when run with --include-script-cbor.
+        "native" -> (decodeTagged "00" =<< o .: "cbor") <|> (decodeNative =<< o .: "json")
+        "plutus:v1" -> decodeTagged "01" =<< o .: "cbor"
+        "plutus:v2" -> decodeTagged "02" =<< o .: "cbor"
+        "plutus:v3" -> decodeTagged "03" =<< o .: "cbor"
+        "plutus:v4" -> decodeTagged "04" =<< o .: "cbor"
         (_ :: Text) -> fail "unrecognized script language"
   where
     decodeNative =
         fmap fromNativeScript . decodeNativeScript
 
-    decodePlutus tag bytes = do
+    decodeTagged tag bytes = do
         case scriptFromBytes <$> decodeBase16 (encodeUtf8 @Text (tag <> bytes)) of
             Right (Just s) ->
                 pure s

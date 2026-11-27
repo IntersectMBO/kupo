@@ -8,6 +8,9 @@ module Test.Kupo.Data.OgmiosSpec
 
 import Kupo.Prelude
 
+import Data.Aeson
+    ( (.=)
+    )
 import Data.List
     ( (!!)
     )
@@ -17,6 +20,8 @@ import Kupo.App.ChainSync.Ogmios
 import Kupo.Data.Cardano
     ( IsBlock (..)
     , UnsupportedSubTransactions (..)
+    , hashScript
+    , scriptHashToText
     )
 import Kupo.Data.Ogmios
     ( NextBlockResponse (..)
@@ -39,6 +44,7 @@ import Test.Hspec
     , it
     , parallel
     , runIO
+    , shouldBe
     , shouldSatisfy
     )
 import Test.Hspec.QuickCheck
@@ -55,10 +61,11 @@ import Test.QuickCheck.Monadic
     , run
     )
 
+import qualified Data.Aeson as Json
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.Types as Json
+import qualified Data.Map as Map
 import qualified Data.Text as Text
-
-import Data.Aeson as Json
-import Data.Aeson.Types as Json
 
 spec :: Spec
 spec = parallel $ context "can decode relevant Ogmios' test vectors" $ do
@@ -98,6 +105,20 @@ spec = parallel $ context "can decode relevant Ogmios' test vectors" $ do
             withBlock (nextBlock "conway" [tx]) $ \blk ->
                 checkSubTransactions blk `shouldSatisfy` isRight
 
+    context "native scripts with a guard clause" $ do
+        it "decodes them from their CBOR" $ do
+            let tx = transactionWithScript scriptGuardHash $ Json.object
+                    [ "language" .= ("native" :: Text)
+                    , "json" .= guardClause []
+                    , "cbor" .= scriptGuardCbor
+                    ]
+            withBlock (nextBlock "dijkstra" [tx]) $ \blk ->
+                witnessedScriptHashes blk `shouldBe` [(scriptGuardHash, scriptGuardHash)]
+
+--
+-- Helpers
+--
+
 withBlock :: Json.Value -> (PartialBlock -> Expectation) -> Expectation
 withBlock value check =
     case Json.parse decodeNextBlockResponse value of
@@ -127,11 +148,11 @@ nextBlock era txs = Json.object
         , "slot" .= (42 :: Int)
         ]
 
-txId :: Text
-txId = Text.replicate 64 "a"
-
-blockId :: Text
-blockId = Text.replicate 64 "b"
+-- | The witnessed scripts of a block, with their key and their own hash.
+witnessedScriptHashes :: PartialBlock -> [(Text, Text)]
+witnessedScriptHashes =
+    fmap (\(scriptHash, script) -> (scriptHashToText scriptHash, scriptHashToText (hashScript script)))
+        . foldBlock (\_ -> (<>) . Map.toList . witnessedScripts @PartialBlock) []
 
 propVector
     :: [FilePath]
@@ -151,3 +172,38 @@ propVector vectors decoder = do
                 assert False
             Json.Success{} -> do
                 assert True
+
+--
+-- Fixtures
+--
+
+txId :: Text
+txId = Text.replicate 64 "a"
+
+blockId :: Text
+blockId = Text.replicate 64 "b"
+
+transactionWithScript :: Text -> Json.Value -> Json.Value
+transactionWithScript scriptHash script = Json.object
+    [ "id" .= txId
+    , "spends" .= ("inputs" :: Text)
+    , "inputs" .= ([] :: [Json.Value])
+    , "scripts" .= Json.object [ Key.fromText scriptHash .= script ]
+    ]
+
+-- | A guard clause on the hash 11...11, with extra fields such as its 'origin'.
+guardClause :: [Json.Pair] -> Json.Value
+guardClause extra = Json.object $
+    [ "clause" .= ("guard" :: Text)
+    , "from" .= Text.replicate 28 "11"
+    ]
+    <> extra
+
+-- | The guard clause on the script hash 11...11.
+scriptGuardCbor :: Text
+scriptGuardCbor =
+    "82068201581c" <> Text.replicate 28 "11"
+
+scriptGuardHash :: Text
+scriptGuardHash =
+    "b9114d0c8fcf4610e179afba560689b160b29a062643772105feb6e7"
